@@ -1,12 +1,12 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import type {
-  Project, ContainerSummary, Volume, EnvVar, Job, Snapshot, TemplateSummary,
+  Project, ContainerSummary, Volume, EnvVar, Job, Snapshot, TemplateSummary, BuildJob,
 } from '../lib/types';
 import {
   deployProject, deleteProject, listProjectEnvVars, upsertProjectEnvVars,
   deleteProjectEnvVars, listJobs, listSnapshots, restoreSnapshot,
 } from '../services/projects';
-import { listContainers, createContainerFromGitHub, createContainerFromTemplate } from '../services/containers';
+import { listContainers, createContainerFromGitHub, createContainerFromTemplate, listBuildJobs } from '../services/containers';
 import { listVolumes, createVolume, deleteVolume } from '../services/volumes';
 import { listTemplates } from '../services/templates';
 import { listBranches, listDirectories, parseRepo } from '../services/github';
@@ -26,21 +26,31 @@ type Tab = 'containers' | 'volumes' | 'envvars' | 'jobs' | 'snapshots';
 
 interface ProjectDetailPageProps {
   project: Project;
+  initialTab?: string;
   onBack: () => void;
   onSelectContainer: (container: ContainerSummary) => void;
+  onTabChange?: (tab: string) => void;
 }
 
 const inputCls = "w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-50 transition-all";
 const labelCls = "block text-sm font-medium text-gray-700 mb-1.5";
 
 export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
-  project, onBack, onSelectContainer,
+  project, initialTab, onBack, onSelectContainer, onTabChange,
 }) => {
-  const [tab, setTab] = useState<Tab>('containers');
+  const validTabs: Tab[] = ['containers', 'volumes', 'envvars', 'jobs', 'snapshots'];
+  const resolvedInitialTab = (validTabs.includes(initialTab as Tab) ? initialTab : 'containers') as Tab;
+  const [tab, setTabState] = useState<Tab>(resolvedInitialTab);
+
+  const setTab = (t: Tab) => {
+    setTabState(t);
+    onTabChange?.(t);
+  };
   const [containers, setContainers] = useState<ContainerSummary[]>([]);
   const [volumes, setVolumes] = useState<Volume[]>([]);
   const [envVars, setEnvVars] = useState<EnvVar[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [buildJobs, setBuildJobs] = useState<BuildJob[]>([]);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,7 +85,19 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
         listJobs(project.id),
         listSnapshots(project.id),
       ]);
-      if (c.status === 'fulfilled') setContainers(c.value);
+      if (c.status === 'fulfilled') {
+        setContainers(c.value);
+        // 全コンテナのビルドジョブを並列取得
+        const bjResults = await Promise.allSettled(
+          c.value.map((container) => listBuildJobs(project.id, container.id))
+        );
+        const allBuildJobs: BuildJob[] = [];
+        bjResults.forEach((r) => {
+          if (r.status === 'fulfilled') allBuildJobs.push(...r.value);
+        });
+        allBuildJobs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        setBuildJobs(allBuildJobs);
+      }
       if (v.status === 'fulfilled') setVolumes(v.value);
       if (e.status === 'fulfilled') setEnvVars(e.value);
       if (j.status === 'fulfilled') setJobs(j.value);
@@ -89,6 +111,42 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
     fetchData();
     listTemplates().then(setTemplates).catch(() => {});
   }, [fetchData]);
+
+  // タブごとのポーリング（5秒間隔）
+  useEffect(() => {
+    const pid = project.id;
+
+    const poll = async () => {
+      try {
+        if (tab === 'containers') {
+          const updated = await listContainers(pid);
+          setContainers(updated);
+        } else if (tab === 'volumes') {
+          const updated = await listVolumes(pid);
+          setVolumes(updated);
+        } else if (tab === 'envvars') {
+          const updated = await listProjectEnvVars(pid);
+          setEnvVars(updated);
+        } else if (tab === 'jobs') {
+          const currentContainers = await listContainers(pid);
+          const bjResults = await Promise.allSettled(
+            currentContainers.map((c) => listBuildJobs(pid, c.id))
+          );
+          const allBuildJobs: BuildJob[] = [];
+          bjResults.forEach((r) => {
+            if (r.status === 'fulfilled') allBuildJobs.push(...r.value);
+          });
+          allBuildJobs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+          setBuildJobs(allBuildJobs);
+        }
+      } catch {
+        // silent
+      }
+    };
+
+    const id = setInterval(poll, 5000);
+    return () => clearInterval(id);
+  }, [tab, project.id]);
 
   const handleDeploy = async () => {
     setDeploying(true);
@@ -206,6 +264,7 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
       });
       setVolumes((prev) => [...prev, v]);
       setVolumeCreateOpen(false);
+      setVolumeForm({ name: '', size_mb: '1024' });
       toastSuccess('ボリュームを作成しました');
     } catch (e: unknown) {
       toastError(e instanceof Error ? e.message : 'ボリューム作成に失敗しました');
@@ -251,7 +310,7 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
     { key: 'containers', label: 'コンテナ', count: containers.length },
     { key: 'volumes',    label: 'ボリューム', count: volumes.length },
     { key: 'envvars',    label: '環境変数', count: envVars.length },
-    { key: 'jobs',       label: 'ジョブ', count: jobs.length },
+    { key: 'jobs',       label: 'ジョブ', count: jobs.length + buildJobs.length },
     { key: 'snapshots',  label: 'スナップショット', count: snapshots.length },
   ];
 
@@ -394,7 +453,7 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
                       { key: 'size', header: 'サイズ', render: (v) => <span className="text-gray-600">{formatBytes(v.size_mb)}</span> },
                       { key: 'status', header: 'ステータス', render: (v) => <Badge status={v.status} /> },
                       { key: 'class', header: 'ストレージクラス', render: (v) => <span className="text-gray-500 text-xs">{v.storage_class}</span> },
-                      { key: 'mounts', header: 'マウント数', render: (v) => <span className="text-gray-500">{v.mounts.length}</span> },
+                      { key: 'mounts', header: 'マウント数', render: (v) => <span className="text-gray-500">{v.mounts?.length ?? 0}</span> },
                       { key: 'created', header: '作成日', render: (v) => <span className="text-gray-500 text-xs">{formatDate(v.created_at)}</span> },
                       {
                         key: 'actions', header: '',
@@ -417,7 +476,7 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
 
             {/* 環境変数 */}
             {tab === 'envvars' && (
-              <div className="max-w-2xl">
+              <div>
                 <div className="mb-4">
                   <h2 className="text-base font-semibold text-gray-800">プロジェクト環境変数</h2>
                   <p className="text-xs text-gray-500 mt-0.5">プロジェクト内の全コンテナで共有されます。</p>
@@ -430,26 +489,54 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
 
             {/* ジョブ */}
             {tab === 'jobs' && (
-              <div>
-                <div className="mb-4">
-                  <h2 className="text-base font-semibold text-gray-800">ジョブ</h2>
-                  <p className="text-xs text-gray-500">デプロイ・スケールなどの実行ジョブ</p>
+              <div className="space-y-6">
+                {/* デプロイジョブ */}
+                <div>
+                  <div className="mb-3">
+                    <h2 className="text-base font-semibold text-gray-800">デプロイジョブ</h2>
+                    <p className="text-xs text-gray-500">デプロイ・スケールなどの実行ジョブ ({jobs.length} 件)</p>
+                  </div>
+                  {jobs.length === 0 ? (
+                    <EmptyState title="ジョブはありません" description="デプロイジョブが実行されるとここに表示されます。" />
+                  ) : (
+                    <Table
+                      columns={[
+                        { key: 'type', header: 'タイプ', render: (j) => <Badge status={j.type} /> },
+                        { key: 'container', header: 'コンテナ', render: (j) => <span className="text-gray-600">{j.container_name ?? '—'}</span> },
+                        { key: 'status', header: 'ステータス', render: (j) => <Badge status={j.status} /> },
+                        { key: 'started', header: '開始', render: (j) => <span className="text-gray-500 text-xs">{formatDate(j.started_at)}</span> },
+                        { key: 'finished', header: '完了', render: (j) => <span className="text-gray-500 text-xs">{formatDate(j.finished_at)}</span> },
+                      ]}
+                      data={jobs}
+                      keyExtractor={(j) => j.id}
+                      emptyMessage="ジョブなし"
+                    />
+                  )}
                 </div>
-                {jobs.length === 0 ? (
-                  <EmptyState title="ジョブはありません" description="デプロイジョブが実行されるとここに表示されます。" />
-                ) : (
-                  <Table
-                    columns={[
-                      { key: 'type', header: 'タイプ', render: (j) => <Badge status={j.type} /> },
-                      { key: 'container', header: 'コンテナ', render: (j) => <span className="text-gray-600">{j.container_name ?? '—'}</span> },
-                      { key: 'status', header: 'ステータス', render: (j) => <Badge status={j.status} /> },
-                      { key: 'started', header: '開始', render: (j) => <span className="text-gray-500 text-xs">{formatDate(j.started_at)}</span> },
-                    ]}
-                    data={jobs}
-                    keyExtractor={(j) => j.id}
-                    emptyMessage="ジョブなし"
-                  />
-                )}
+
+                {/* ビルドジョブ */}
+                <div>
+                  <div className="mb-3">
+                    <h2 className="text-base font-semibold text-gray-800">ビルドジョブ</h2>
+                    <p className="text-xs text-gray-500">プロジェクト内全コンテナのビルド履歴 ({buildJobs.length} 件)</p>
+                  </div>
+                  {buildJobs.length === 0 ? (
+                    <EmptyState title="ビルドジョブはありません" description="ビルドが実行されるとここに表示されます。" />
+                  ) : (
+                    <Table
+                      columns={[
+                        { key: 'status', header: 'ステータス', render: (j) => <Badge status={j.status} /> },
+                        { key: 'branch', header: 'ブランチ', render: (j) => <span className="font-mono text-xs text-gray-700">{j.git_branch || '—'}</span> },
+                        { key: 'commit', header: 'コミット', render: (j) => j.git_commit ? <span className="font-mono text-xs text-gray-500">{j.git_commit.slice(0, 7)}</span> : <span className="text-gray-300">—</span> },
+                        { key: 'started', header: '開始', render: (j) => <span className="text-gray-500 text-xs">{formatDate(j.started_at)}</span> },
+                        { key: 'finished', header: '完了', render: (j) => <span className="text-gray-500 text-xs">{formatDate(j.finished_at)}</span> },
+                      ]}
+                      data={buildJobs}
+                      keyExtractor={(j) => j.id}
+                      emptyMessage="ビルドジョブなし"
+                    />
+                  )}
+                </div>
               </div>
             )}
 

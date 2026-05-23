@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import type {
-  ContainerDetail, ContainerSummary, EnvVar, Port,
+  ContainerDetail, ContainerSummary, EnvVar,
   NetworkRoute, Mount, BuildJob, Volume,
 } from '../lib/types';
 import {
   getContainer, redeployContainer, rebuildContainer, deleteContainer, scaleContainer,
   listContainerEnvVars, upsertContainerEnvVars, deleteContainerEnvVars,
-  listPorts, createPort, deletePort,
+  listPorts, deletePort,
   listRoutes, createServiceRoute, createIngressRoute, deleteRoute,
   createMount, deleteMount, listBuildJobs,
 } from '../services/containers';
@@ -27,21 +27,30 @@ import { toastError, toastSuccess } from '../components/ui/Toast';
 import { formatDate, formatRelativeTime } from '../lib/utils';
 import type { Project } from '../lib/types';
 
-type Tab = 'overview' | 'logs' | 'metrics' | 'buildjobs' | 'envvars' | 'ports' | 'routes' | 'mounts';
+type Tab = 'overview' | 'logs' | 'metrics' | 'buildjobs' | 'envvars' | 'network' | 'mounts';
 
 interface ContainerDetailPageProps {
   project: Project;
   container: ContainerSummary;
+  initialTab?: string;
   onBack: () => void;
+  onTabChange?: (tab: string) => void;
 }
 
 const inputCls = "w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-50 transition-all";
 const labelCls = "block text-sm font-medium text-gray-700 mb-1.5";
 
 export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
-  project, container: initialContainer, onBack,
+  project, container: initialContainer, initialTab, onBack, onTabChange,
 }) => {
-  const [tab, setTab] = useState<Tab>('overview');
+  const validTabs: Tab[] = ['overview', 'logs', 'metrics', 'buildjobs', 'envvars', 'network', 'mounts'];
+  const resolvedInitialTab = (validTabs.includes(initialTab as Tab) ? initialTab : 'overview') as Tab;
+  const [tab, setTabState] = useState<Tab>(resolvedInitialTab);
+
+  const setTab = (t: Tab) => {
+    setTabState(t);
+    onTabChange?.(t);
+  };
   const [detail, setDetail] = useState<ContainerDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [redeploying, setRedeploying] = useState(false);
@@ -52,14 +61,13 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
   const [scaleReplicas, setScaleReplicas] = useState('1');
   const [scaling, setScaling] = useState(false);
 
-  const [ports, setPorts] = useState<Port[]>([]);
-  const [portCreateOpen, setPortCreateOpen] = useState(false);
-  const [portForm, setPortForm] = useState<{ port: string; protocol: 'TCP' | 'UDP' }>({ port: '', protocol: 'TCP' });
-  const [creatingPort, setCreatingPort] = useState(false);
+  const [ports, setPorts] = useState<{ id: string; port: number; protocol: string }[]>([]);
 
   const [routes, setRoutes] = useState<NetworkRoute[]>([]);
   const [routeCreateOpen, setRouteCreateOpen] = useState(false);
-  const [routeForm, setRouteForm] = useState({ type: 'service' as 'service' | 'ingress', port: '', protocol: 'http', subdomain: '' });
+  const [routeType, setRouteType] = useState<'service' | 'ingress'>('service');
+  const [serviceRouteForm, setServiceRouteForm] = useState({ port: '', protocol: 'TCP' });
+  const [ingressRouteForm, setIngressRouteForm] = useState({ port: '', routeServiceId: '' });
   const [creatingRoute, setCreatingRoute] = useState(false);
 
   const [mounts, setMounts] = useState<Mount[]>([]);
@@ -105,6 +113,36 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
   }, [project.id, initialContainer.id]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  // タブごとのポーリング（5秒間隔）
+  useEffect(() => {
+    const pid = project.id;
+    const cid = initialContainer.id;
+
+    const poll = async () => {
+      try {
+        if (tab === 'overview') {
+          const updated = await getContainer(pid, cid);
+          setDetail(updated);
+        } else if (tab === 'network') {
+          const [pts, rts] = await Promise.all([listPorts(pid, cid), listRoutes(pid, cid)]);
+          setPorts(pts);
+          setRoutes(rts);
+        } else if (tab === 'mounts') {
+          const updated = await getContainer(pid, cid);
+          setMounts(updated.mounts ?? []);
+        } else if (tab === 'envvars') {
+          const updated = await listContainerEnvVars(pid, cid);
+          setEnvVars(updated);
+        }
+      } catch {
+        // silent
+      }
+    };
+
+    const id = setInterval(poll, 5000);
+    return () => clearInterval(id);
+  }, [tab, project.id, initialContainer.id]);
 
   const handleRedeploy = async () => {
     setRedeploying(true);
@@ -170,23 +208,6 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
     }
   };
 
-  const handleCreatePort = async () => {
-    const portNum = parseInt(portForm.port, 10);
-    if (isNaN(portNum)) return;
-    setCreatingPort(true);
-    try {
-      const p = await createPort(project.id, initialContainer.id, { port: portNum, protocol: portForm.protocol });
-      setPorts((prev) => [...prev, p]);
-      setPortCreateOpen(false);
-      setPortForm({ port: '', protocol: 'TCP' });
-      toastSuccess('ポートを追加しました');
-    } catch (e: unknown) {
-      toastError(e instanceof Error ? e.message : 'ポート追加に失敗しました');
-    } finally {
-      setCreatingPort(false);
-    }
-  };
-
   const handleDeletePort = async (portId: string) => {
     try {
       await deletePort(project.id, initialContainer.id, portId);
@@ -198,20 +219,24 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
   };
 
   const handleCreateRoute = async () => {
-    const portNum = parseInt(routeForm.port, 10);
-    if (isNaN(portNum)) return;
     setCreatingRoute(true);
     try {
-      let r: NetworkRoute;
-      if (routeForm.type === 'service') {
-        r = await createServiceRoute(project.id, initialContainer.id, { port: portNum, protocol: routeForm.protocol });
+      if (routeType === 'service') {
+        const portNum = parseInt(serviceRouteForm.port, 10);
+        if (isNaN(portNum)) return;
+        await createServiceRoute(project.id, initialContainer.id, { port: portNum, protocol: serviceRouteForm.protocol });
       } else {
-        r = await createIngressRoute(project.id, initialContainer.id, { port: portNum });
+        const portNum = parseInt(ingressRouteForm.port, 10);
+        if (isNaN(portNum)) return;
+        await createIngressRoute(project.id, initialContainer.id, { port: portNum });
       }
-      setRoutes((prev) => [...prev, r]);
       setRouteCreateOpen(false);
-      setRouteForm({ type: 'service', port: '', protocol: 'http', subdomain: '' });
+      setServiceRouteForm({ port: '', protocol: 'TCP' });
+      setIngressRouteForm({ port: '', routeServiceId: '' });
       toastSuccess('ルートを作成しました');
+      // ワークフロー起動後すぐに一覧を再取得して表示を更新
+      const updated = await listRoutes(project.id, initialContainer.id);
+      setRoutes(updated);
     } catch (e: unknown) {
       toastError(e instanceof Error ? e.message : 'ルート作成に失敗しました');
     } finally {
@@ -268,20 +293,21 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
       const logs = await getBuildJobLogs(project.id, job.id, { limit: '2000' });
       setBuildLogs(logs);
     } catch {
-      setBuildLogs([]);
+      // silent
     } finally {
       setBuildLogsLoading(false);
     }
   }, [project.id]);
 
-  const refreshBuildLogs = useCallback(async (job: BuildJob) => {
+  const refreshBuildLogs = useCallback(async () => {
+    if (!buildLogJob) return;
     try {
-      const logs = await getBuildJobLogs(project.id, job.id, { limit: '2000' });
+      const logs = await getBuildJobLogs(project.id, buildLogJob.id, { limit: '2000' });
       setBuildLogs(logs);
     } catch {
       // silent
     }
-  }, [project.id]);
+  }, [project.id, buildLogJob]);
 
   const refreshBuildJobs = useCallback(async () => {
     try {
@@ -307,8 +333,8 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
   useEffect(() => {
     if (tab !== 'buildjobs') return;
     if (!buildLogJob) return;
-    if (buildLogJob.status !== 'pending' && buildLogJob.status !== 'running') return;
-    const id = setInterval(() => refreshBuildLogs(buildLogJob), 3000);
+    refreshBuildLogs();
+    const id = setInterval(refreshBuildLogs, 3000);
     return () => clearInterval(id);
   }, [tab, buildLogJob, refreshBuildLogs]);
 
@@ -324,8 +350,7 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
     { key: 'metrics',   label: 'メトリクス' },
     { key: 'buildjobs', label: 'ビルド' },
     { key: 'envvars',   label: '環境変数' },
-    { key: 'ports',     label: 'ポート' },
-    { key: 'routes',    label: 'ルート' },
+    { key: 'network',   label: 'ネットワーク' },
     { key: 'mounts',    label: 'マウント' },
   ];
 
@@ -419,9 +444,9 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
               <div className="space-y-4 max-w-4xl">
                 {/* Info cards */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <InfoCard label="リソースサイズ" value={detail.resource_size} icon="📦" />
-                  <InfoCard label="レプリカ" value={`${detail.ready_replicas} / ${detail.replicas}`} icon="⚙️" />
-                  <InfoCard label="失敗 Pod" value={String(detail.failed_replicas)} icon="⚠️" />
+                  <InfoCard label="リソースサイズ" value={detail.resource_size} />
+                  <InfoCard label="レプリカ" value={`${detail.ready_replicas} / ${detail.replicas}`} />
+                  <InfoCard label="失敗 Pod" value={String(detail.failed_replicas)} />
                 </div>
 
                 {/* Git info */}
@@ -469,7 +494,7 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
 
             {/* メトリクス */}
             {tab === 'metrics' && (
-              <div className="max-w-3xl">
+              <div>
                 <MetricsChart projectId={project.id} containerId={initialContainer.id} />
               </div>
             )}
@@ -565,12 +590,7 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
                       ) : (
                         <div
                           ref={buildLogScrollRef}
-                          onScroll={() => {
-                            const el = buildLogScrollRef.current;
-                            if (!el) return;
-                            const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
-                            if (!atBottom) setBuildLogAutoScroll(false);
-                          }}
+                          onWheel={(e) => { if (e.deltaY < 0) setBuildLogAutoScroll(false); }}
                           className="flex-1 min-h-0 overflow-y-auto p-4 font-mono text-xs leading-relaxed"
                         >
                           {buildLogs
@@ -613,7 +633,7 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
 
             {/* 環境変数 */}
             {tab === 'envvars' && (
-              <div className="max-w-2xl">
+              <div>
                 <div className="mb-4">
                   <h2 className="text-base font-semibold text-gray-800">環境変数</h2>
                   <p className="text-xs text-gray-500">このコンテナ専用の環境変数</p>
@@ -624,78 +644,91 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
               </div>
             )}
 
-            {/* ポート */}
-            {tab === 'ports' && (
-              <div>
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h2 className="text-base font-semibold text-gray-800">ポート</h2>
-                    <p className="text-xs text-gray-500">{ports.length} 件</p>
+            {/* ネットワーク */}
+            {tab === 'network' && (
+              <div className="space-y-6">
+                {/* Service セクション */}
+                <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                  <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+                    <div>
+                      <h2 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
+                        <Badge status="service" />
+                        Service
+                      </h2>
+                      <p className="text-xs text-gray-500 mt-0.5">コンテナのポートをクラスタ内に公開します</p>
+                    </div>
+                    <Button variant="primary" size="sm" onClick={() => { setRouteType('service'); setRouteCreateOpen(true); }}
+                      icon={<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>}
+                    >
+                      Service を追加
+                    </Button>
                   </div>
-                  <Button variant="primary" size="sm" onClick={() => setPortCreateOpen(true)}
-                    icon={<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>}
-                  >
-                    ポートを追加
-                  </Button>
+                  <Table
+                    columns={[
+                      { key: 'port', header: 'ポート', render: (r) => <span className="font-mono font-semibold text-gray-800">:{r.port}</span> },
+                      { key: 'protocol', header: 'プロトコル', render: (r) => <span className="text-gray-600 text-xs font-mono">{r.protocol || '—'}</span> },
+                      { key: 'created', header: '作成日', render: (r) => <span className="text-gray-400 text-xs">{formatDate(r.created_at)}</span> },
+                      {
+                        key: 'actions', header: '',
+                        render: (r) => (
+                          <Button variant="ghost" size="sm" onClick={() => handleDeleteRoute(r.id)}>
+                            <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </Button>
+                        ),
+                      },
+                    ]}
+                    data={routes.filter((r) => r.type === 'service')}
+                    keyExtractor={(r) => r.id}
+                    emptyMessage="Service がありません"
+                  />
                 </div>
-                <Table
-                  columns={[
-                    { key: 'port', header: 'ポート番号', render: (p) => <span className="font-mono font-semibold text-gray-800">{p.port}</span> },
-                    { key: 'protocol', header: 'プロトコル', render: (p) => <Badge status={p.protocol} /> },
-                    {
-                      key: 'actions', header: '',
-                      render: (p) => (
-                        <Button variant="ghost" size="sm" onClick={() => handleDeletePort(p.id)}>
-                          <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </Button>
-                      ),
-                    },
-                  ]}
-                  data={ports}
-                  keyExtractor={(p) => p.id}
-                  emptyMessage="ポートが設定されていません"
-                />
-              </div>
-            )}
 
-            {/* ルート */}
-            {tab === 'routes' && (
-              <div>
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h2 className="text-base font-semibold text-gray-800">ネットワークルート</h2>
-                    <p className="text-xs text-gray-500">{routes.length} 件</p>
+                {/* Ingress セクション */}
+                <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                  <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+                    <div>
+                      <h2 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
+                        <Badge status="ingress" />
+                        Ingress
+                      </h2>
+                      <p className="text-xs text-gray-500 mt-0.5">Service を外部インターネットに公開します</p>
+                    </div>
+                    <Button variant="primary" size="sm"
+                      onClick={() => { setRouteType('ingress'); setRouteCreateOpen(true); }}
+                      disabled={routes.filter((r) => r.type === 'service').length === 0}
+                      icon={<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>}
+                    >
+                      Ingress を追加
+                    </Button>
                   </div>
-                  <Button variant="primary" size="sm" onClick={() => setRouteCreateOpen(true)}
-                    icon={<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>}
-                  >
-                    ルートを追加
-                  </Button>
+                  {routes.filter((r) => r.type === 'service').length === 0 && (
+                    <div className="px-5 py-3 bg-yellow-50 border-b border-yellow-100">
+                      <p className="text-xs text-yellow-700">Ingress を追加するには先に Service を作成してください</p>
+                    </div>
+                  )}
+                  <Table
+                    columns={[
+                      { key: 'service', header: '対象 Service', render: (r) => <span className="font-mono text-gray-800">:{r.port}</span> },
+                      { key: 'subdomain', header: 'ホスト / サブドメイン', render: (r) => r.subdomain ? <span className="font-mono text-blue-600 text-xs">{r.subdomain}</span> : <span className="text-gray-400 text-xs">—</span> },
+                      { key: 'created', header: '作成日', render: (r) => <span className="text-gray-400 text-xs">{formatDate(r.created_at)}</span> },
+                      {
+                        key: 'actions', header: '',
+                        render: (r) => (
+                          <Button variant="ghost" size="sm" onClick={() => handleDeleteRoute(r.id)}>
+                            <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </Button>
+                        ),
+                      },
+                    ]}
+                    data={routes.filter((r) => r.type === 'ingress')}
+                    keyExtractor={(r) => r.id}
+                    emptyMessage="Ingress がありません"
+                  />
                 </div>
-                <Table
-                  columns={[
-                    { key: 'type', header: 'タイプ', render: (r) => <Badge status={r.type} /> },
-                    { key: 'port', header: 'ポート', render: (r) => <span className="font-mono text-gray-800">{r.port}</span> },
-                    { key: 'protocol', header: 'プロトコル', render: (r) => <span className="text-gray-500">{r.protocol ?? '—'}</span> },
-                    { key: 'subdomain', header: 'サブドメイン', render: (r) => r.subdomain ? <span className="font-mono text-blue-600 text-xs">{r.subdomain}</span> : <span className="text-gray-300">—</span> },
-                    { key: 'created', header: '作成日', render: (r) => <span className="text-gray-500 text-xs">{formatDate(r.created_at)}</span> },
-                    {
-                      key: 'actions', header: '',
-                      render: (r) => (
-                        <Button variant="ghost" size="sm" onClick={() => handleDeleteRoute(r.id)}>
-                          <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </Button>
-                      ),
-                    },
-                  ]}
-                  data={routes}
-                  keyExtractor={(r) => r.id}
-                  emptyMessage="ルートが設定されていません"
-                />
               </div>
             )}
 
@@ -759,79 +792,64 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
         </div>
       </Modal>
 
-      {/* ポート追加モーダル */}
-      <Modal open={portCreateOpen} onClose={() => setPortCreateOpen(false)} title="ポートを追加" size="sm"
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setPortCreateOpen(false)}>キャンセル</Button>
-            <Button variant="primary" onClick={handleCreatePort} loading={creatingPort} disabled={!portForm.port}>追加</Button>
-          </>
-        }
-      >
-        <div className="space-y-4">
-          <div>
-            <label className={labelCls}>ポート番号</label>
-            <input type="number" value={portForm.port}
-              onChange={(e) => setPortForm((p) => ({ ...p, port: e.target.value }))}
-              placeholder="8080" className={inputCls}
-            />
-          </div>
-          <div>
-            <label className={labelCls}>プロトコル</label>
-            <div className="flex gap-2">
-              {(['TCP', 'UDP'] as const).map((proto) => (
-                <button key={proto} onClick={() => setPortForm((p) => ({ ...p, protocol: proto }))}
-                  className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all border
-                    ${portForm.protocol === proto ? 'bg-blue-50 text-blue-700 border-blue-300' : 'bg-white text-gray-500 border-gray-200 hover:border-blue-200'}`}
-                >
-                  {proto}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      </Modal>
 
       {/* ルート追加モーダル */}
-      <Modal open={routeCreateOpen} onClose={() => setRouteCreateOpen(false)} title="ルートを追加" size="sm"
+      <Modal
+        open={routeCreateOpen}
+        onClose={() => setRouteCreateOpen(false)}
+        title={routeType === 'service' ? 'Service を追加' : 'Ingress を追加'}
+        size="sm"
         footer={
           <>
             <Button variant="secondary" onClick={() => setRouteCreateOpen(false)}>キャンセル</Button>
-            <Button variant="primary" onClick={handleCreateRoute} loading={creatingRoute} disabled={!routeForm.port}>作成</Button>
+            <Button variant="primary" onClick={handleCreateRoute} loading={creatingRoute}
+              disabled={routeType === 'service' ? !serviceRouteForm.port : !ingressRouteForm.port}
+            >
+              作成
+            </Button>
           </>
         }
       >
-        <div className="space-y-4">
-          <div>
-            <label className={labelCls}>タイプ</label>
-            <div className="flex gap-2">
-              {(['service', 'ingress'] as const).map((type) => (
-                <button key={type} onClick={() => setRouteForm((r) => ({ ...r, type }))}
-                  className={`flex-1 py-2 rounded-lg text-sm font-medium capitalize transition-all border
-                    ${routeForm.type === type ? 'bg-blue-50 text-blue-700 border-blue-300' : 'bg-white text-gray-500 border-gray-200 hover:border-blue-200'}`}
-                >
-                  {type}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <label className={labelCls}>ポート番号</label>
-            <input type="number" value={routeForm.port}
-              onChange={(e) => setRouteForm((r) => ({ ...r, port: e.target.value }))}
-              placeholder="8080" className={inputCls}
-            />
-          </div>
-          {routeForm.type === 'service' && (
+        {routeType === 'service' ? (
+          <div className="space-y-4">
+            <p className="text-xs text-gray-500">コンテナのポートをクラスタ内 Service として公開します。</p>
             <div>
-              <label className={labelCls}>プロトコル</label>
-              <input type="text" value={routeForm.protocol}
-                onChange={(e) => setRouteForm((r) => ({ ...r, protocol: e.target.value }))}
-                placeholder="http" className={inputCls}
+              <label className={labelCls}>ポート番号</label>
+              <input type="number" value={serviceRouteForm.port}
+                onChange={(e) => setServiceRouteForm((r) => ({ ...r, port: e.target.value }))}
+                placeholder="8080" className={inputCls}
               />
             </div>
-          )}
-        </div>
+            <div>
+              <label className={labelCls}>プロトコル</label>
+              <select value={serviceRouteForm.protocol}
+                onChange={(e) => setServiceRouteForm((r) => ({ ...r, protocol: e.target.value }))}
+                className={inputCls}
+              >
+                <option value="TCP">TCP</option>
+                <option value="UDP">UDP</option>
+              </select>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <p className="text-xs text-gray-500">既存の Service を選択して外部に公開します。</p>
+            <div>
+              <label className={labelCls}>対象 Service</label>
+              <select value={ingressRouteForm.port}
+                onChange={(e) => setIngressRouteForm((r) => ({ ...r, port: e.target.value }))}
+                className={inputCls}
+              >
+                <option key="__empty" value="">Service を選択...</option>
+                {routes.filter((r) => r.type === 'service').map((r) => (
+                  <option key={r.id} value={String(r.port)}>
+                    :{r.port} ({r.protocol || 'tcp'})
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* マウントモーダル */}
@@ -854,9 +872,9 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
               onChange={(e) => setMountForm((m) => ({ ...m, volume_id: e.target.value }))}
               className={inputCls}
             >
-              <option value="">ボリュームを選択...</option>
+              <option key="__empty" value="">ボリュームを選択...</option>
               {volumes.map((v) => (
-                <option key={v.id} value={v.id}>{v.name}</option>
+                <option key={v.id} value={v.id}>{v.name || v.id}</option>
               ))}
             </select>
           </div>
@@ -882,13 +900,10 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
   );
 };
 
-interface InfoCardProps { label: string; value: string; icon: string; }
-const InfoCard: React.FC<InfoCardProps> = ({ label, value, icon }) => (
-  <div className="bg-white border border-gray-200 rounded-xl p-4 flex items-center gap-3">
-    <span className="text-2xl">{icon}</span>
-    <div>
-      <p className="text-xs text-gray-500">{label}</p>
-      <p className="text-sm font-semibold text-gray-800 mt-0.5">{value}</p>
-    </div>
+interface InfoCardProps { label: string; value: string; }
+const InfoCard: React.FC<InfoCardProps> = ({ label, value }) => (
+  <div className="bg-white border border-gray-200 rounded-xl p-4">
+    <p className="text-xs text-gray-500">{label}</p>
+    <p className="text-sm font-semibold text-gray-800 mt-1">{value}</p>
   </div>
 );
