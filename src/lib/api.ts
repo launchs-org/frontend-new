@@ -1,198 +1,98 @@
-import type { ApiResponse } from './types';
+import axios, { type InternalAxiosRequestConfig } from 'axios';
 
-export const API_BASE = '/app/api/v1';
+// Extend AxiosRequestConfig to include useRefreshToken
+declare module 'axios' {
+  export interface AxiosRequestConfig {
+    useRefreshToken?: boolean;
+  }
+}
 
-const REFRESH_PATH = (import.meta as ImportMeta & { env: Record<string, string> }).env?.VITE_API_REFRESH_PATH ?? '/auth/token';
-const CACHE_DURATION = 5 * 60 * 1000; // 5分
+export const api = axios.create({
+  baseURL: '', // Always empty, use absolute or full paths
+  withCredentials: true,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
 
-// ── トークン管理 ──────────────────────────────────────────────
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+let refreshPromise: Promise<any> | null = null;
 
-const getRefreshToken = (): string | null => localStorage.getItem('token');
-
-const getAccessToken = (): string | null => sessionStorage.getItem('access_token');
-
-const setAccessToken = (token: string): void => {
+const getRefreshToken = () => localStorage.getItem('token');
+const getAccessToken = () => sessionStorage.getItem('access_token');
+const setAccessToken = (token: string) => {
   sessionStorage.setItem('access_token', token);
-  sessionStorage.setItem('access_token_timestamp', String(Date.now()));
+  sessionStorage.setItem('access_token_timestamp', Date.now().toString());
 };
-
-const clearTokens = (): void => {
+const clearTokens = () => {
   localStorage.removeItem('token');
   sessionStorage.removeItem('access_token');
   sessionStorage.removeItem('access_token_timestamp');
 };
 
-const isAccessTokenFresh = (): boolean => {
-  const ts = parseInt(sessionStorage.getItem('access_token_timestamp') ?? '0', 10);
-  return !!getAccessToken() && Date.now() - ts < CACHE_DURATION;
-};
+const REFRESH_PATH = import.meta.env.VITE_API_REFRESH_PATH || '/auth/token';
 
-// リフレッシュ中の重複呼び出し防止
-let refreshPromise: Promise<void> | null = null;
-
-/** リフレッシュトークンでアクセストークンを取得・キャッシュする */
-async function refreshAccessToken(): Promise<void> {
-  const refreshToken = getRefreshToken();
-  if (!refreshToken) {
-    throw new Error('no_refresh_token');
+// Request interceptor to add JWT token and handle URL prefixing
+api.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
+  // Always send credentials
+  config.withCredentials = true;
+  
+  // If useRefreshToken is true, use refresh token
+  if (config.useRefreshToken) {
+    const refreshToken = getRefreshToken();
+    if (refreshToken) {
+      config.headers.Authorization = refreshToken;
+    }
+    return config;
   }
 
-  const res = await fetch(REFRESH_PATH, {
-    method: 'GET',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: refreshToken,
-    },
-  });
-
-  if (!res.ok) {
-    throw new Error(`refresh_failed:${res.status}`);
+  // Otherwise, use access token. Check if it's expired or missing first.
+  // Don't auto-refresh if we are currently calling the refresh endpoint itself
+  const isRefreshing = config.url === REFRESH_PATH || config.url?.endsWith(REFRESH_PATH);
+  
+  if (!isRefreshing) {
+    const lastFetched = parseInt(sessionStorage.getItem('access_token_timestamp') || '0');
+    const now = Date.now();
+    
+    if (!getAccessToken() || (now - lastFetched > CACHE_DURATION)) {
+      if (!refreshPromise) {
+        // Refresh token call itself needs the refresh token
+        refreshPromise = api.get(REFRESH_PATH, { useRefreshToken: true }).finally(() => { 
+          refreshPromise = null; 
+        });
+      }
+      try {
+        await refreshPromise;
+      } catch (e) {
+        // Refresh failed
+      }
+    }
   }
 
-  const data = await res.json();
-  if (data?.token) {
-    setAccessToken(data.token);
-  } else {
-    throw new Error('refresh_no_token');
-  }
-}
-
-/** アクセストークンを取得（必要に応じてリフレッシュ） */
-async function ensureAccessToken(): Promise<string | null> {
-  if (isAccessTokenFresh()) {
-    return getAccessToken();
-  }
-
-  if (!refreshPromise) {
-    refreshPromise = refreshAccessToken().finally(() => {
-      refreshPromise = null;
-    });
-  }
-  try {
-    await refreshPromise;
-  } catch {
-    // リフレッシュ失敗 → トークンなしで続行（401ハンドラが処理）
-  }
-
-  return getAccessToken();
-}
-
-// ── 認証状態チェック（起動時用） ──────────────────────────────
-
-/** リフレッシュトークンが存在してアクセストークンが取得できるか確認する */
-export async function checkAuth(): Promise<boolean> {
-  if (!getRefreshToken()) return false;
-  try {
-    await refreshAccessToken();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** ログアウト：トークンをクリアして /auth/login へ */
-export async function logout(): Promise<void> {
-  const refreshToken = getRefreshToken();
-  if (refreshToken) {
-    // ベストエフォートでサーバー側ログアウト
-    fetch('/auth/logout', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { Authorization: refreshToken },
-    }).catch(() => {});
-  }
-  clearTokens();
-  window.location.href = '/auth/login';
-}
-
-// ── エラークラス ──────────────────────────────────────────────
-
-export class ApiError extends Error {
-  code: string;
-  status: number;
-
-  constructor(code: string, message: string, status: number) {
-    super(message);
-    this.code = code;
-    this.status = status;
-    this.name = 'ApiError';
-  }
-}
-
-// ── fetch ラッパー ────────────────────────────────────────────
-
-async function buildHeaders(): Promise<Record<string, string>> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-  const token = await ensureAccessToken();
+  const token = getAccessToken();
   if (token) {
-    headers['Authorization'] = token;
+    config.headers.Authorization = token;
   }
-  return headers;
-}
+  return config;
+});
 
-async function handleResponse<T>(res: Response): Promise<T> {
-  if (res.status === 401) {
-    clearTokens();
-    window.location.href = '/auth/login';
-    throw new ApiError('UNAUTHORIZED', 'Unauthorized', 401);
+// Response interceptor to handle token storage and 401
+api.interceptors.response.use(
+  (response) => {
+    // If this was a refresh call (via useRefreshToken), save the result as access token
+    if (response.config.useRefreshToken && response.data?.token) {
+      setAccessToken(response.data.token);
+    }
+    return response;
+  },
+  (error) => {
+    if (error.response?.status === 401) {
+      clearTokens();
+      window.location.href = '/ui/';
+    }
+    return Promise.reject(error);
   }
+);
 
-  if (res.status === 204) {
-    return undefined as unknown as T;
-  }
+export default api;
 
-  const json: ApiResponse<T> = await res.json();
-
-  if (!res.ok || json.error) {
-    const err = json.error ?? { code: 'UNKNOWN', message: `HTTP ${res.status}` };
-    throw new ApiError(err.code, err.message, res.status);
-  }
-
-  return json.data;
-}
-
-export async function get<T>(path: string, params?: Record<string, string>): Promise<T> {
-  const url = new URL(`${API_BASE}${path}`, window.location.origin);
-  if (params) {
-    Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-  }
-  const res = await fetch(url.toString(), {
-    method: 'GET',
-    credentials: 'include',
-    headers: await buildHeaders(),
-  });
-  return handleResponse<T>(res);
-}
-
-export async function post<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: await buildHeaders(),
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-  return handleResponse<T>(res);
-}
-
-export async function put<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: 'PUT',
-    credentials: 'include',
-    headers: await buildHeaders(),
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-  return handleResponse<T>(res);
-}
-
-export async function del<T = void>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: 'DELETE',
-    credentials: 'include',
-    headers: await buildHeaders(),
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-  return handleResponse<T>(res);
-}

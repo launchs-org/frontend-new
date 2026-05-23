@@ -1,176 +1,102 @@
-import { useState, useEffect, useCallback } from 'react';
-import type { Project, ContainerSummary } from './lib/types';
-import { checkAuth, logout } from './lib/api';
-import { listProjects } from './services/projects';
-import { Layout } from './components/layout/Layout';
-import { ProjectsPage } from './pages/ProjectsPage';
-import { ProjectDetailPage } from './pages/ProjectDetailPage';
-import { ContainerDetailPage } from './pages/ContainerDetailPage';
-import { TemplatesPage } from './pages/TemplatesPage';
-import { ToastContainer } from './components/ui/Toast';
-import { Spinner } from './components/ui/Spinner';
-import './index.css';
+import React from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { User, Loader2 } from 'lucide-react';
+import Layout from './components/Layout';
+import Projects from './pages/Projects';
+import ProjectDetail from './pages/ProjectDetail';
+import { api } from './lib/api';
 
-type PageName = 'projects' | 'project-detail' | 'container-detail' | 'templates' | 'volumes';
-type AuthState = 'checking' | 'authenticated' | 'unauthenticated';
+const App: React.FC = () => {
+  const [isAuthenticated, setIsAuthenticated] = React.useState(!!sessionStorage.getItem('access_token'));
+  const [isVerifying, setIsVerifying] = React.useState(!!localStorage.getItem('token'));
 
-interface NavState {
-  page: PageName;
-  project?: Project;
-  container?: ContainerSummary;
-}
+  React.useEffect(() => {
+    const checkAuth = async () => {
+      const refreshToken = localStorage.getItem('token');
+      if (!refreshToken) {
+        setIsAuthenticated(false);
+        setIsVerifying(false);
+        return;
+      }
 
-// ── 未認証画面 ────────────────────────────────────────────────
+      try {
+        // Use absolute path and specify useRefreshToken option
+        await api.get(import.meta.env.VITE_API_AUTH_ME_PATH || '/auth/me', { useRefreshToken: true });
+        setIsAuthenticated(true);
+      } catch (error: any) {
 
-function LoginPrompt() {
-  return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl border border-gray-200 p-10 w-full max-w-md text-center">
-        <div className="flex justify-center mb-6">
-          <div className="w-14 h-14 rounded-2xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-200">
-            <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M12 5l7 7-7 7" />
-            </svg>
-          </div>
-        </div>
+        if (error.response?.status === 401) {
+          setIsAuthenticated(false);
+        }
+      } finally {
+        setIsVerifying(false);
+      }
+    };
 
-        <h1 className="text-2xl font-bold text-gray-800 mb-2">Launchs コンソール</h1>
-        <p className="text-gray-500 text-sm mb-8">
-          続けるにはログインが必要です。
-        </p>
-
-        <a
-          href="/auth/login"
-          className="block w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-150"
-        >
-          ログインページへ
-        </a>
-
-        <p className="mt-6 text-xs text-gray-400">
-          ログイン後、このページに自動で戻ります。
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ── メインアプリ ──────────────────────────────────────────────
-
-function MainApp() {
-  const [nav, setNav] = useState<NavState>({ page: 'projects' });
-  const [projects, setProjects] = useState<Project[]>([]);
-
-  const fetchProjects = useCallback(async () => {
-    try {
-      const data = await listProjects();
-      setProjects(data);
-    } catch {
-      // ProjectsPage 側でエラー表示
-    }
+    checkAuth();
   }, []);
 
-  useEffect(() => {
-    fetchProjects();
-  }, [fetchProjects]);
 
-  const handleNavigate = (page: PageName, params?: Record<string, string>) => {
-    if (page === 'projects') {
-      setNav({ page: 'projects' });
-    } else if (page === 'project-detail' && params?.projectId) {
-      const project = projects.find((p) => p.id === params.projectId);
-      if (project) setNav({ page: 'project-detail', project });
-    } else if (page === 'templates') {
-      setNav({ page: 'templates' });
-    } else {
-      setNav({ page });
-    }
-  };
-
-  const selectedProjectId =
-    nav.page === 'project-detail' || nav.page === 'container-detail'
-      ? (nav.project?.id ?? null)
-      : null;
-
-  return (
-    <Layout
-      currentPage={nav.page}
-      projects={projects}
-      selectedProjectId={selectedProjectId}
-      onNavigate={handleNavigate}
-      onLogout={logout}
-    >
-      {nav.page === 'projects' && (
-        <ProjectsPage
-          onSelectProject={(project) => {
-            setProjects((prev) => {
-              if (!prev.find((p) => p.id === project.id)) return [...prev, project];
-              return prev.map((p) => (p.id === project.id ? project : p));
-            });
-            setNav({ page: 'project-detail', project });
-          }}
-        />
-      )}
-
-      {nav.page === 'project-detail' && nav.project && (
-        <ProjectDetailPage
-          project={nav.project}
-          onBack={() => {
-            fetchProjects();
-            setNav({ page: 'projects' });
-          }}
-          onSelectContainer={(container) => {
-            setNav({ page: 'container-detail', project: nav.project, container });
-          }}
-        />
-      )}
-
-      {nav.page === 'container-detail' && nav.project && nav.container && (
-        <ContainerDetailPage
-          project={nav.project}
-          container={nav.container}
-          onBack={() => {
-            setNav({ page: 'project-detail', project: nav.project });
-          }}
-        />
-      )}
-
-      {nav.page === 'templates' && <TemplatesPage />}
-    </Layout>
-  );
-}
-
-// ── ルート ────────────────────────────────────────────────────
-
-function App() {
-  const [authState, setAuthState] = useState<AuthState>('checking');
-
-  useEffect(() => {
-    checkAuth().then((ok) => {
-      setAuthState(ok ? 'authenticated' : 'unauthenticated');
-    });
-  }, []);
-
-  if (authState === 'checking') {
+  if (isVerifying) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
-          <Spinner size="lg" />
-          <p className="text-sm text-gray-400">認証を確認中...</p>
+      <div className="min-h-screen bg-[#f8f9fa] flex flex-col items-center justify-center p-4 font-sans">
+        <Loader2 className="w-8 h-8 text-google-blue animate-spin mb-4" />
+        <p className="text-[#5f6368] font-medium">認証状態を確認中...</p>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-[#f8f9fa] flex items-center justify-center p-4 font-sans">
+        <div className="google-card p-10 text-center w-full max-w-md bg-white">
+          <div className="w-16 h-16 bg-blue-50 text-google-blue rounded-full flex items-center justify-center mx-auto mb-6">
+            <User size={32} />
+          </div>
+          <h1 className="text-2xl font-medium text-[#202124] mb-4">ログインが必要です</h1>
+          <p className="text-[#5f6368] mb-8 leading-relaxed">
+            Launchs を管理するには、AuthBase での認証が必要です。下のボタンからログインページへ進んでください。
+          </p>
+          
+          <a 
+            href="/auth/login" 
+            className="inline-block w-full bg-google-blue hover:bg-blue-700 text-white font-medium py-3 px-6 rounded-md transition-all shadow-sm hover:shadow-md"
+          >
+            ログイン画面へ移動
+          </a>
+          
+          <p className="mt-6 text-xs text-gray-400">
+            ログイン後、このページに戻ってきてください。
+          </p>
         </div>
       </div>
     );
   }
 
-  if (authState === 'unauthenticated') {
-    return <LoginPrompt />;
-  }
-
   return (
-    <>
-      <MainApp />
-      <ToastContainer />
-    </>
+    <BrowserRouter basename="/ui/">
+      <Layout>
+        <Routes>
+          <Route path="/" element={<Projects />} />
+          <Route path="/projects" element={<Projects />} />
+          <Route path="/projects/:id" element={<ProjectDetail />} />
+          {/* <Route path="/containers/:id" element={<ContainerDetail />} /> */}
+          {/* <Route path="/history" element={<History />} />
+          <Route path="/monitoring" element={<Monitoring />} /> */}
+          {/* Add more routes here as they are created */}
+          <Route path="*" element={
+            <div className="flex flex-col items-center justify-center h-full space-y-4">
+              <h1 className="text-9xl font-black italic tracking-tighter">404</h1>
+              <p className="text-sm font-bold uppercase tracking-[0.5em] text-gray-400">Page not found</p>
+              <button onClick={() => window.history.back()} className="mt-8 px-8 py-3 bg-black text-white font-bold hover:bg-gray-800 transition-colors uppercase tracking-widest text-xs border border-black">
+                GO BACK
+              </button>
+            </div>
+          } />
+        </Routes>
+      </Layout>
+    </BrowserRouter>
   );
-}
+};
 
 export default App;
