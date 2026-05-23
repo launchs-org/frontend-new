@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import type {
-  Project, ContainerSummary, Volume, EnvVar, Job, Snapshot, TemplateSummary, BuildJob,
+  Project, ContainerSummary, Volume, EnvVar, Job, Snapshot, BuildJob,
 } from '../lib/types';
 import {
   deployProject, deleteProject, listProjectEnvVars, upsertProjectEnvVars,
@@ -8,7 +8,6 @@ import {
 } from '../services/projects';
 import { listContainers, createContainerFromGitHub, createContainerFromTemplate, listBuildJobs } from '../services/containers';
 import { listVolumes, createVolume, deleteVolume } from '../services/volumes';
-import { listTemplates } from '../services/templates';
 import { listBranches, listDirectories, parseRepo } from '../services/github';
 import { ContainerCard } from '../components/containers/ContainerCard';
 import { EnvVarEditor } from '../components/envvars/EnvVarEditor';
@@ -52,7 +51,6 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
   const [jobs, setJobs] = useState<Job[]>([]);
   const [buildJobs, setBuildJobs] = useState<BuildJob[]>([]);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
-  const [templates, setTemplates] = useState<TemplateSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [deploying, setDeploying] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -109,7 +107,6 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
 
   useEffect(() => {
     fetchData();
-    listTemplates().then(setTemplates).catch(() => {});
   }, [fetchData]);
 
   // タブごとのポーリング（5秒間隔）
@@ -699,29 +696,27 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
           </div>
           <div>
             <label className={labelCls}>テンプレートを選択</label>
-            {templates.length === 0 ? (
-              <div className="text-center py-4 text-sm text-gray-400 bg-gray-50 rounded-lg">テンプレートがありません</div>
-            ) : (
-              <div className="grid grid-cols-2 gap-2 max-h-56 overflow-y-auto">
-                {templates.map((t) => (
-                  <button
-                    key={t.name}
-                    onClick={() => setTemplateForm((prev) => ({ ...prev, template_name: t.name }))}
-                    className={`flex items-center gap-2.5 p-3 rounded-xl border text-left transition-all
-                      ${templateForm.template_name === t.name
-                        ? 'border-blue-500 bg-blue-50'
-                        : 'border-gray-200 hover:border-blue-300 hover:bg-blue-50/30'
-                      }`}
-                  >
-                    <span className="text-2xl">{t.icon}</span>
-                    <div>
-                      <p className="text-sm font-medium text-gray-800">{t.display_name}</p>
-                      <p className="text-[11px] text-gray-400">{t.category}</p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { name: 'mysql', display_name: 'MySQL', category: 'Database', icon: '🐬' },
+                { name: 'postgres', display_name: 'PostgreSQL', category: 'Database', icon: '🐘' },
+                { name: 'redis', display_name: 'Redis', category: 'Cache', icon: '⚡' },
+              ].map((t) => (
+                <button
+                  key={t.name}
+                  onClick={() => setTemplateForm((prev) => ({ ...prev, template_name: t.name }))}
+                  className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border text-center transition-all
+                    ${templateForm.template_name === t.name
+                      ? 'border-blue-500 bg-blue-50'
+                      : 'border-gray-200 hover:border-blue-300 hover:bg-blue-50/30'
+                    }`}
+                >
+                  <span className="text-2xl">{t.icon}</span>
+                  <p className="text-sm font-medium text-gray-800">{t.display_name}</p>
+                  <p className="text-[11px] text-gray-400">{t.category}</p>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </Modal>

@@ -6,7 +6,7 @@ import type {
 import {
   getContainer, redeployContainer, rebuildContainer, deleteContainer, scaleContainer,
   listContainerEnvVars, upsertContainerEnvVars, deleteContainerEnvVars,
-  listPorts, deletePort,
+  listPorts,
   listRoutes, createServiceRoute, createIngressRoute, deleteRoute,
   createMount, deleteMount, listBuildJobs,
 } from '../services/containers';
@@ -61,8 +61,6 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
   const [scaleReplicas, setScaleReplicas] = useState('1');
   const [scaling, setScaling] = useState(false);
 
-  const [ports, setPorts] = useState<{ id: string; port: number; protocol: string }[]>([]);
-
   const [routes, setRoutes] = useState<NetworkRoute[]>([]);
   const [routeCreateOpen, setRouteCreateOpen] = useState(false);
   const [routeType, setRouteType] = useState<'service' | 'ingress'>('service');
@@ -89,7 +87,7 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [det, ev, pt, rt, bj, vol] = await Promise.allSettled([
+      const [det, ev, , rt, bj, vol] = await Promise.allSettled([
         getContainer(project.id, initialContainer.id),
         listContainerEnvVars(project.id, initialContainer.id),
         listPorts(project.id, initialContainer.id),
@@ -103,7 +101,6 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
         setScaleReplicas(String(det.value.replicas));
       }
       if (ev.status === 'fulfilled') setEnvVars(ev.value);
-      if (pt.status === 'fulfilled') setPorts(pt.value);
       if (rt.status === 'fulfilled') setRoutes(rt.value);
       if (bj.status === 'fulfilled') setBuildJobs(bj.value);
       if (vol.status === 'fulfilled') setVolumes(vol.value);
@@ -125,8 +122,7 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
           const updated = await getContainer(pid, cid);
           setDetail(updated);
         } else if (tab === 'network') {
-          const [pts, rts] = await Promise.all([listPorts(pid, cid), listRoutes(pid, cid)]);
-          setPorts(pts);
+          const [, rts] = await Promise.all([listPorts(pid, cid), listRoutes(pid, cid)]);
           setRoutes(rts);
         } else if (tab === 'mounts') {
           const updated = await getContainer(pid, cid);
@@ -205,16 +201,6 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
     if (deleteKeys.length > 0) {
       await deleteContainerEnvVars(project.id, initialContainer.id, { keys: deleteKeys });
       setEnvVars((prev) => prev.filter((v) => !deleteKeys.includes(v.key)));
-    }
-  };
-
-  const handleDeletePort = async (portId: string) => {
-    try {
-      await deletePort(project.id, initialContainer.id, portId);
-      setPorts((prev) => prev.filter((p) => p.id !== portId));
-      toastSuccess('ポートを削除しました');
-    } catch (e: unknown) {
-      toastError(e instanceof Error ? e.message : '削除に失敗しました');
     }
   };
 
