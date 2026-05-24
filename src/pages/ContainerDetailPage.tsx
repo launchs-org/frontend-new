@@ -60,6 +60,7 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
   const [scaleOpen, setScaleOpen] = useState(false);
   const [scaleReplicas, setScaleReplicas] = useState('1');
   const [scaling, setScaling] = useState(false);
+  const [envVarsEditing, setEnvVarsEditing] = useState(false);
 
   const [routes, setRoutes] = useState<NetworkRoute[]>([]);
   const [routeCreateOpen, setRouteCreateOpen] = useState(false);
@@ -84,6 +85,14 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
   const buildLogBottomRef = useRef<HTMLDivElement>(null);
   const [envVars, setEnvVars] = useState<EnvVar[]>([]);
 
+  // ボリューム一覧からこのコンテナのマウントを抽出するヘルパー
+  const extractMountsFromVolumes = (vols: Volume[]): Mount[] =>
+    vols.flatMap((v) =>
+      (v.mounts ?? [])
+        .filter((m) => m.container_id === initialContainer.id)
+        .map((m) => ({ ...m, volume_name: v.name }))
+    );
+
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
@@ -97,13 +106,15 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
       ]);
       if (det.status === 'fulfilled') {
         setDetail(det.value);
-        setMounts(det.value.mounts ?? []);
         setScaleReplicas(String(det.value.replicas));
       }
       if (ev.status === 'fulfilled') setEnvVars(ev.value);
       if (rt.status === 'fulfilled') setRoutes(rt.value);
       if (bj.status === 'fulfilled') setBuildJobs(bj.value);
-      if (vol.status === 'fulfilled') setVolumes(vol.value);
+      if (vol.status === 'fulfilled') {
+        setVolumes(vol.value);
+        setMounts(extractMountsFromVolumes(vol.value));
+      }
     } finally {
       setLoading(false);
     }
@@ -125,11 +136,14 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
           const [, rts] = await Promise.all([listPorts(pid, cid), listRoutes(pid, cid)]);
           setRoutes(rts);
         } else if (tab === 'mounts') {
-          const updated = await getContainer(pid, cid);
-          setMounts(updated.mounts ?? []);
+          const vols = await listVolumes(pid);
+          setVolumes(vols);
+          setMounts(extractMountsFromVolumes(vols));
         } else if (tab === 'envvars') {
-          const updated = await listContainerEnvVars(pid, cid);
-          setEnvVars(updated);
+          if (!envVarsEditing) {
+            const updated = await listContainerEnvVars(pid, cid);
+            setEnvVars(updated);
+          }
         }
       } catch {
         // silent
@@ -220,7 +234,6 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
       setServiceRouteForm({ port: '', protocol: 'TCP' });
       setIngressRouteForm({ port: '', routeServiceId: '' });
       toastSuccess('ルートを作成しました');
-      // ワークフロー起動後すぐに一覧を再取得して表示を更新
       const updated = await listRoutes(project.id, initialContainer.id);
       setRoutes(updated);
     } catch (e: unknown) {
@@ -252,6 +265,10 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
       setMountCreateOpen(false);
       setMountForm({ volume_id: '', mount_path: '' });
       toastSuccess('ボリュームをマウントしました');
+      // マウント後にボリューム一覧を再取得して最新状態に同期
+      const vols = await listVolumes(project.id);
+      setVolumes(vols);
+      setMounts(extractMountsFromVolumes(vols));
     } catch (e: unknown) {
       toastError(e instanceof Error ? e.message : 'マウントに失敗しました');
     } finally {
@@ -331,13 +348,13 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
   }, [buildLogs, buildLogAutoScroll]);
 
   const tabs: { key: Tab; label: string }[] = [
-    { key: 'overview',  label: '概要' },
-    { key: 'logs',      label: 'ログ' },
-    { key: 'metrics',   label: 'メトリクス' },
+    { key: 'overview', label: '概要' },
+    { key: 'logs', label: 'ログ' },
+    { key: 'metrics', label: 'メトリクス' },
     { key: 'buildjobs', label: 'ビルド' },
-    { key: 'envvars',   label: '環境変数' },
-    { key: 'network',   label: 'ネットワーク' },
-    { key: 'mounts',    label: 'マウント' },
+    { key: 'envvars', label: '環境変数' },
+    { key: 'network', label: 'ネットワーク' },
+    { key: 'mounts', label: 'マウント' },
   ];
 
   const container = detail ?? initialContainer;
@@ -505,11 +522,10 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
                         <button
                           key={j.id}
                           onClick={() => openBuildLog(j)}
-                          className={`w-full text-left px-3 py-2.5 rounded-xl border transition-all shrink-0 ${
-                            buildLogJob?.id === j.id
+                          className={`w-full text-left px-3 py-2.5 rounded-xl border transition-all shrink-0 ${buildLogJob?.id === j.id
                               ? 'border-blue-500 bg-blue-50'
                               : 'border-gray-200 bg-white hover:border-blue-300 hover:bg-gray-50'
-                          }`}
+                            }`}
                         >
                           <div className="flex items-center justify-between gap-2 mb-1">
                             <Badge status={j.status} />
@@ -551,9 +567,8 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
                         {/* 自動スクロールトグル */}
                         <button
                           onClick={() => setBuildLogAutoScroll((v) => !v)}
-                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${
-                            buildLogAutoScroll ? 'bg-green-900 text-green-400' : 'bg-gray-700 text-gray-400'
-                          }`}
+                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${buildLogAutoScroll ? 'bg-green-900 text-green-400' : 'bg-gray-700 text-gray-400'
+                            }`}
                         >
                           <span className={`w-1.5 h-1.5 rounded-full ${buildLogAutoScroll ? 'bg-green-400 animate-pulse' : 'bg-gray-500'}`} />
                           自動スクロール
@@ -625,7 +640,11 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
                   <p className="text-xs text-gray-500">このコンテナ専用の環境変数</p>
                 </div>
                 <div className="bg-white border border-gray-200 rounded-xl p-4">
-                  <EnvVarEditor envVars={envVars} onSave={handleSaveEnvVars} />
+                  <EnvVarEditor
+                    envVars={envVars}
+                    onSave={handleSaveEnvVars}
+                    onEditingChange={setEnvVarsEditing}
+                  />
                 </div>
               </div>
             )}
@@ -778,7 +797,6 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
         </div>
       </Modal>
 
-
       {/* ルート追加モーダル */}
       <Modal
         open={routeCreateOpen}
@@ -881,7 +899,6 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
         message={`"${initialContainer.name}" を削除しますか？この操作は取り消せません。`}
         confirmLabel="削除する" loading={deleting}
       />
-
     </>
   );
 };

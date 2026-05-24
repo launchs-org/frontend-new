@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import type { EnvVar } from '../../lib/types';
 import { Button } from '../ui/Button';
 import { toastError, toastSuccess } from '../ui/Toast';
@@ -22,18 +22,23 @@ export const EnvVarEditor: React.FC<EnvVarEditorProps> = ({ envVars, onSave, loa
   const [rows, setRows] = useState<EnvVarRow[]>([]);
   const [saving, setSaving] = useState(false);
   const [showValues, setShowValues] = useState<Record<number, boolean>>({});
+  const isDirtyRef = useRef(false);
 
   useEffect(() => {
+    // 編集中（未保存の変更あり）はポーリングによる上書きをスキップ
+    if (isDirtyRef.current) return;
     setRows(
       envVars.map((v) => ({ id: v.id, key: v.key, value: v.value }))
     );
   }, [envVars]);
 
   const addRow = () => {
+    isDirtyRef.current = true;
     setRows((prev) => [...prev, { key: '', value: '', isNew: true }]);
   };
 
   const updateRow = (idx: number, field: 'key' | 'value', val: string) => {
+    isDirtyRef.current = true;
     setRows((prev) =>
       prev.map((r, i) =>
         i === idx ? { ...r, [field]: val, isDirty: true } : r
@@ -42,6 +47,7 @@ export const EnvVarEditor: React.FC<EnvVarEditorProps> = ({ envVars, onSave, loa
   };
 
   const deleteRow = (idx: number) => {
+    isDirtyRef.current = true;
     setRows((prev) => prev.filter((_, i) => i !== idx));
   };
 
@@ -57,6 +63,7 @@ export const EnvVarEditor: React.FC<EnvVarEditorProps> = ({ envVars, onSave, loa
     setSaving(true);
     try {
       await onSave(upsert, deleteKeys);
+      isDirtyRef.current = false; // 保存成功でフラグをリセット
       toastSuccess('Environment variables saved');
     } catch (e: unknown) {
       toastError(e instanceof Error ? e.message : 'Failed to save env vars');
