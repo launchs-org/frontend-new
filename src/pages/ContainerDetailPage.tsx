@@ -108,6 +108,8 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
         setDetail(det.value);
         setScaleReplicas(String(det.value.replicas));
       }
+
+      console.log('ev:', ev); // これを追加
       if (ev.status === 'fulfilled') setEnvVars(ev.value);
       if (rt.status === 'fulfilled') setRoutes(rt.value);
       if (bj.status === 'fulfilled') setBuildJobs(bj.value);
@@ -209,13 +211,13 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
 
   const handleSaveEnvVars = async (upsert: { key: string; value: string }[], deleteKeys: string[]) => {
     if (upsert.length > 0) {
-      const updated = await upsertContainerEnvVars(project.id, initialContainer.id, { env_vars: upsert });
-      setEnvVars(updated);
+      await upsertContainerEnvVars(project.id, initialContainer.id, { env_vars: upsert });
     }
     if (deleteKeys.length > 0) {
       await deleteContainerEnvVars(project.id, initialContainer.id, { keys: deleteKeys });
-      setEnvVars((prev) => prev.filter((v) => !deleteKeys.includes(v.key)));
     }
+    const latest = await listContainerEnvVars(project.id, initialContainer.id);
+    setEnvVars(latest);
   };
 
   const handleCreateRoute = async () => {
