@@ -570,6 +570,28 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
                       自動スクロール
                     </button>
 
+                    {/* ダウンロード */}
+                    {buildLogs.length > 0 && (
+                      <button
+                        onClick={() => {
+                          const text = buildLogs.map((l) => `${new Date(l.timestamp).toISOString()} [${l.level}] ${l.message}`).join('\n');
+                          const blob = new Blob([text], { type: 'text/plain' });
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement('a');
+                          a.href = url;
+                          a.download = `build-${buildLogJob?.id.slice(0, 8) ?? 'log'}.log`;
+                          a.click();
+                          URL.revokeObjectURL(url);
+                        }}
+                        className="p-1.5 text-gray-400 hover:text-gray-200 hover:bg-gray-700 rounded-lg transition-all shrink-0"
+                        title="ログをダウンロード"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                      </button>
+                    )}
+
                     {/* 件数 */}
                     <span className="text-[11px] text-gray-500 shrink-0">
                       {buildLogs.filter((l) => !buildLogSearch || l.message.toLowerCase().includes(buildLogSearch.toLowerCase())).length} 件
