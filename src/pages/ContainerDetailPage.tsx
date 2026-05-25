@@ -131,10 +131,11 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
 
     const poll = async () => {
       try {
-        if (tab === 'overview') {
-          const updated = await getContainer(pid, cid);
-          setDetail(updated);
-        } else if (tab === 'network') {
+        // コンテナステータスは常に更新
+        const updated = await getContainer(pid, cid);
+        setDetail(updated);
+
+        if (tab === 'network') {
           const [, rts] = await Promise.all([listPorts(pid, cid), listRoutes(pid, cid)]);
           setRoutes(rts);
         } else if (tab === 'mounts') {
@@ -143,8 +144,8 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
           setMounts(extractMountsFromVolumes(vols));
         } else if (tab === 'envvars') {
           if (!envVarsEditing) {
-            const updated = await listContainerEnvVars(pid, cid);
-            setEnvVars(updated);
+            const evUpdated = await listContainerEnvVars(pid, cid);
+            setEnvVars(evUpdated);
           }
         }
       } catch {
@@ -154,7 +155,7 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
 
     const id = setInterval(poll, 5000);
     return () => clearInterval(id);
-  }, [tab, project.id, initialContainer.id]);
+  }, [tab, project.id, initialContainer.id, envVarsEditing]);
 
   const handleRedeploy = async () => {
     setRedeploying(true);
@@ -493,7 +494,7 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
             {/* ログ */}
             {tab === 'logs' && (
               <div className="flex-1 flex flex-col" style={{ minHeight: '500px' }}>
-                <LogViewer projectId={project.id} containerId={initialContainer.id} />
+                <LogViewer projectId={project.id} containerId={initialContainer.id} pods={container.pods} />
               </div>
             )}
 

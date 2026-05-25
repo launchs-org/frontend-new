@@ -1,24 +1,28 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import type { LogLine } from '../../lib/types';
+import type { LogLine, PodStatus } from '../../lib/types';
 import { getLogs } from '../../services/logs';
 
 interface LogViewerProps {
   projectId: string;
   containerId: string;
+  pods?: PodStatus[];
 }
 
-export const LogViewer: React.FC<LogViewerProps> = ({ projectId, containerId }) => {
+export const LogViewer: React.FC<LogViewerProps> = ({ projectId, containerId, pods }) => {
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [autoScroll, setAutoScroll] = useState(true);
+  const [selectedPod, setSelectedPod] = useState<string>('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const fetchLogs = useCallback(async () => {
     try {
-      const data = await getLogs(projectId, containerId, { limit: '2000' });
+      const params: { limit: string; pod?: string } = { limit: '2000' };
+      if (selectedPod) params.pod = selectedPod;
+      const data = await getLogs(projectId, containerId, params);
       setLogs(data);
       setError(null);
     } catch (e: unknown) {
@@ -26,9 +30,11 @@ export const LogViewer: React.FC<LogViewerProps> = ({ projectId, containerId }) 
     } finally {
       setLoading(false);
     }
-  }, [projectId, containerId]);
+  }, [projectId, containerId, selectedPod]);
 
   useEffect(() => {
+    setLoading(true);
+    setLogs([]);
     fetchLogs();
     const id = setInterval(fetchLogs, 5000);
     return () => clearInterval(id);
@@ -44,10 +50,26 @@ export const LogViewer: React.FC<LogViewerProps> = ({ projectId, containerId }) 
     ? logs.filter((l) => l.message.toLowerCase().includes(search.toLowerCase()))
     : logs;
 
+  const multiplePods = pods && pods.length > 1;
+
   return (
     <div className="flex-1 flex flex-col bg-gray-900 rounded-xl overflow-hidden" style={{ minHeight: '400px' }}>
       {/* Toolbar */}
       <div className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-700 bg-gray-800 shrink-0">
+        {multiplePods && (
+          <select
+            value={selectedPod}
+            onChange={(e) => setSelectedPod(e.target.value)}
+            className="bg-gray-700 border border-gray-600 rounded-lg px-2.5 py-1 text-xs font-mono text-gray-200 focus:outline-none focus:border-blue-500 shrink-0"
+          >
+            <option value="">全 Pod</option>
+            {pods.map((p) => (
+              <option key={p.pod_name} value={p.pod_name}>
+                {p.pod_name}
+              </option>
+            ))}
+          </select>
+        )}
         <div className="flex-1 relative">
           <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -108,6 +130,11 @@ export const LogViewer: React.FC<LogViewerProps> = ({ projectId, containerId }) 
               <span className="text-gray-600 shrink-0 select-none tabular-nums">
                 {new Date(line.timestamp).toLocaleTimeString('ja-JP', { hour12: false })}
               </span>
+              {!selectedPod && multiplePods && line.pod_name && (
+                <span className="text-gray-500 shrink-0 select-none truncate max-w-[140px]" title={line.pod_name}>
+                  {line.pod_name}
+                </span>
+              )}
               <span className="whitespace-pre-wrap break-all">{line.message}</span>
             </div>
           ))}
