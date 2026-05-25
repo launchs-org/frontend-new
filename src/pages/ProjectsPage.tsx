@@ -26,16 +26,16 @@ function getProjectColor(name: string): string {
 
 type StatusMeta = { label: string; spinning: boolean; color: string; textColor: string };
 
-function getStatusMeta(status: ProjectStatus): StatusMeta {
+function getStatusMeta(status: ProjectStatus | undefined): StatusMeta {
   switch (status) {
     case 'pending':
       return { label: 'プロビジョニング中', spinning: true, color: 'bg-blue-50 border-blue-200', textColor: 'text-blue-600' };
-    case 'active':
-      return { label: 'アクティブ', spinning: false, color: '', textColor: 'text-green-600' };
     case 'terminating':
       return { label: '削除中', spinning: true, color: 'bg-red-50 border-red-200', textColor: 'text-red-500' };
     case 'failed':
       return { label: 'エラー', spinning: false, color: 'bg-red-50 border-red-200', textColor: 'text-red-600' };
+    default:
+      return { label: 'アクティブ', spinning: false, color: '', textColor: 'text-green-600' };
   }
 }
 
