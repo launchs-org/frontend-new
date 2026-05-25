@@ -53,8 +53,8 @@ export async function listProjectEnvVars(projectId: string): Promise<EnvVar[]> {
 export async function upsertProjectEnvVars(
   projectId: string,
   req: UpsertEnvVarsRequest
-): Promise<EnvVar[]> {
-  return put<EnvVar[]>(`/projects/${projectId}/env-vars`, req);
+): Promise<void> {
+  return put<void>(`/projects/${projectId}/env-vars`, req);
 }
 
 export async function deleteProjectEnvVars(

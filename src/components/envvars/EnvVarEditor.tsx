@@ -16,9 +16,10 @@ interface EnvVarEditorProps {
   envVars: EnvVar[];
   onSave: (upsert: { key: string; value: string }[], deleteKeys: string[]) => Promise<void>;
   loading?: boolean;
+  onEditingChange?: (editing: boolean) => void;
 }
 
-export const EnvVarEditor: React.FC<EnvVarEditorProps> = ({ envVars, onSave, loading = false }) => {
+export const EnvVarEditor: React.FC<EnvVarEditorProps> = ({ envVars, onSave, loading = false, onEditingChange }) => {
   const [rows, setRows] = useState<EnvVarRow[]>([]);
   const [saving, setSaving] = useState(false);
   const [showValues, setShowValues] = useState<Record<number, boolean>>({});
@@ -34,11 +35,13 @@ export const EnvVarEditor: React.FC<EnvVarEditorProps> = ({ envVars, onSave, loa
 
   const addRow = () => {
     isDirtyRef.current = true;
+    onEditingChange?.(true);
     setRows((prev) => [...prev, { key: '', value: '', isNew: true }]);
   };
 
   const updateRow = (idx: number, field: 'key' | 'value', val: string) => {
     isDirtyRef.current = true;
+    onEditingChange?.(true);
     setRows((prev) =>
       prev.map((r, i) =>
         i === idx ? { ...r, [field]: val, isDirty: true } : r
@@ -48,6 +51,7 @@ export const EnvVarEditor: React.FC<EnvVarEditorProps> = ({ envVars, onSave, loa
 
   const deleteRow = (idx: number) => {
     isDirtyRef.current = true;
+    onEditingChange?.(true);
     setRows((prev) => prev.filter((_, i) => i !== idx));
   };
 
@@ -63,7 +67,8 @@ export const EnvVarEditor: React.FC<EnvVarEditorProps> = ({ envVars, onSave, loa
     setSaving(true);
     try {
       await onSave(upsert, deleteKeys);
-      isDirtyRef.current = false; // 保存成功でフラグをリセット
+      isDirtyRef.current = false;
+      onEditingChange?.(false);
       toastSuccess('Environment variables saved');
     } catch (e: unknown) {
       toastError(e instanceof Error ? e.message : 'Failed to save env vars');

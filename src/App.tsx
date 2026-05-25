@@ -12,7 +12,7 @@ import { ToastContainer } from './components/ui/Toast';
 import { Spinner } from './components/ui/Spinner';
 import './index.css';
 
-type PageName = 'projects' | 'project-detail' | 'container-detail' | 'templates';
+type PageName = 'projects' | 'project-detail' | 'container-detail' | 'templates' | 'volumes';
 type AuthState = 'checking' | 'authenticated' | 'unauthenticated';
 
 interface NavState {

@@ -3,7 +3,7 @@ import type {
   Project, ContainerSummary, Volume, EnvVar, Job, Snapshot, BuildJob,
 } from '../lib/types';
 import {
-  deployProject, deleteProject, listProjectEnvVars, upsertProjectEnvVars,
+  deleteProject, listProjectEnvVars, upsertProjectEnvVars,
   deleteProjectEnvVars, listJobs, listSnapshots, restoreSnapshot,
 } from '../services/projects';
 import { listContainers, createContainerFromGitHub, createContainerFromTemplate, listBuildJobs } from '../services/containers';
@@ -52,7 +52,6 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
   const [buildJobs, setBuildJobs] = useState<BuildJob[]>([]);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [loading, setLoading] = useState(true);
-  const [deploying, setDeploying] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -145,17 +144,6 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
     return () => clearInterval(id);
   }, [tab, project.id]);
 
-  const handleDeploy = async () => {
-    setDeploying(true);
-    try {
-      await deployProject(project.id);
-      toastSuccess('デプロイを開始しました');
-    } catch (e: unknown) {
-      toastError(e instanceof Error ? e.message : 'デプロイに失敗しました');
-    } finally {
-      setDeploying(false);
-    }
-  };
 
   const handleDelete = async () => {
     setDeleting(true);
@@ -285,13 +273,13 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
     deleteKeys: string[]
   ) => {
     if (upsert.length > 0) {
-      const updated = await upsertProjectEnvVars(project.id, { env_vars: upsert });
-      setEnvVars(updated);
+      await upsertProjectEnvVars(project.id, { env_vars: upsert });
     }
     if (deleteKeys.length > 0) {
       await deleteProjectEnvVars(project.id, { keys: deleteKeys });
-      setEnvVars((prev) => prev.filter((v) => !deleteKeys.includes(v.key)));
     }
+    const latest = await listProjectEnvVars(project.id);
+    setEnvVars(latest);
   };
 
   const handleRestoreSnapshot = async (snapshotId: string) => {
@@ -320,12 +308,6 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
         ]}
         actions={
           <div className="flex items-center gap-2">
-            <Button
-              variant="primary" size="sm" onClick={handleDeploy} loading={deploying}
-              icon={<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M12 5l7 7-7 7" /></svg>}
-            >
-              全デプロイ
-            </Button>
             <Button variant="secondary" size="sm" onClick={() => setDeleteOpen(true)}>
               <svg className="w-3.5 h-3.5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -476,7 +458,7 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
               <div>
                 <div className="mb-4">
                   <h2 className="text-base font-semibold text-gray-800">プロジェクト環境変数</h2>
-                  <p className="text-xs text-gray-500 mt-0.5">プロジェクト内の全コンテナで共有されます。</p>
+                  <p className="text-xs text-gray-500 mt-0.5">プロジェクト内に属する環境変数です。</p>
                 </div>
                 <div className="bg-white border border-gray-200 rounded-xl p-4">
                   <EnvVarEditor envVars={envVars} onSave={handleSaveEnvVars} />

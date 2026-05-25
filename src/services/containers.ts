@@ -81,8 +81,8 @@ export async function upsertContainerEnvVars(
   projectId: string,
   containerId: string,
   req: UpsertEnvVarsRequest
-): Promise<EnvVar[]> {
-  return put<EnvVar[]>(`/projects/${projectId}/containers/${containerId}/env-vars`, req);
+): Promise<void> {
+  return put<void>(`/projects/${projectId}/containers/${containerId}/env-vars`, req);
 }
 
 export async function deleteContainerEnvVars(
@@ -91,6 +91,15 @@ export async function deleteContainerEnvVars(
   req: DeleteEnvVarsRequest
 ): Promise<void> {
   return del(`/projects/${projectId}/containers/${containerId}/env-vars`, req);
+}
+
+export async function getSelectedProjectEnvVarKeys(projectId: string, containerId: string): Promise<string[]> {
+  const res = await get<{ keys: string[] }>(`/projects/${projectId}/containers/${containerId}/selected-project-env-vars`);
+  return res.keys ?? [];
+}
+
+export async function setSelectedProjectEnvVarKeys(projectId: string, containerId: string, keys: string[]): Promise<void> {
+  return put<void>(`/projects/${projectId}/containers/${containerId}/selected-project-env-vars`, { keys });
 }
 
 // Ports

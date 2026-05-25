@@ -6,10 +6,12 @@ import type {
 import {
   getContainer, redeployContainer, rebuildContainer, deleteContainer, scaleContainer,
   listContainerEnvVars, upsertContainerEnvVars, deleteContainerEnvVars,
+  getSelectedProjectEnvVarKeys, setSelectedProjectEnvVarKeys as apiSetSelectedProjectEnvVarKeys,
   listPorts,
   listRoutes, createServiceRoute, createIngressRoute, deleteRoute,
   createMount, deleteMount, listBuildJobs,
 } from '../services/containers';
+import { listProjectEnvVars } from '../services/projects';
 import { listVolumes } from '../services/volumes';
 import { getBuildJobLogs } from '../services/logs';
 import { ContainerStatusBadge } from '../components/containers/ContainerStatusBadge';
@@ -86,6 +88,9 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
   const buildLogScrollRef = useRef<HTMLDivElement>(null);
   const buildLogBottomRef = useRef<HTMLDivElement>(null);
   const [envVars, setEnvVars] = useState<EnvVar[]>([]);
+  const [projectEnvVars, setProjectEnvVars] = useState<EnvVar[]>([]);
+  const [selectedProjectEnvVarKeys, setSelectedProjectEnvVarKeys] = useState<string[]>([]);
+  const [savingSelection, setSavingSelection] = useState(false);
 
   // ボリューム一覧からこのコンテナのマウントを抽出するヘルパー
   const extractMountsFromVolumes = (vols: Volume[]): Mount[] =>
@@ -98,9 +103,11 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [det, ev, , rt, bj, vol] = await Promise.allSettled([
+      const [det, ev, pev, sel, , rt, bj, vol] = await Promise.allSettled([
         getContainer(project.id, initialContainer.id),
         listContainerEnvVars(project.id, initialContainer.id),
+        listProjectEnvVars(project.id),
+        getSelectedProjectEnvVarKeys(project.id, initialContainer.id),
         listPorts(project.id, initialContainer.id),
         listRoutes(project.id, initialContainer.id),
         listBuildJobs(project.id, initialContainer.id),
@@ -110,9 +117,9 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
         setDetail(det.value);
         setScaleReplicas(String(det.value.replicas));
       }
-
-      console.log('ev:', ev); // これを追加
       if (ev.status === 'fulfilled') setEnvVars(ev.value);
+      if (pev.status === 'fulfilled') setProjectEnvVars(pev.value);
+      if (sel.status === 'fulfilled') setSelectedProjectEnvVarKeys(sel.value);
       if (rt.status === 'fulfilled') setRoutes(rt.value);
       if (bj.status === 'fulfilled') setBuildJobs(bj.value);
       if (vol.status === 'fulfilled') {
@@ -146,8 +153,14 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
           setMounts(extractMountsFromVolumes(vols));
         } else if (tab === 'envvars') {
           if (!envVarsEditing) {
-            const evUpdated = await listContainerEnvVars(pid, cid);
+            const [evUpdated, pevUpdated, selUpdated] = await Promise.all([
+              listContainerEnvVars(pid, cid),
+              listProjectEnvVars(pid),
+              getSelectedProjectEnvVarKeys(pid, cid),
+            ]);
             setEnvVars(evUpdated);
+            setProjectEnvVars(pevUpdated);
+            setSelectedProjectEnvVarKeys(selUpdated);
           }
         }
       } catch {
@@ -655,17 +668,98 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
 
             {/* 環境変数 */}
             {tab === 'envvars' && (
-              <div>
-                <div className="mb-4">
-                  <h2 className="text-base font-semibold text-gray-800">環境変数</h2>
-                  <p className="text-xs text-gray-500">このコンテナ専用の環境変数</p>
+              <div className="space-y-6">
+                {/* プロジェクト変数の選択 */}
+                <div>
+                  <div className="mb-3 flex items-start justify-between">
+                    <div>
+                      <h2 className="text-base font-semibold text-gray-800">プロジェクト変数</h2>
+                      <p className="text-xs text-gray-500">このコンテナで使用するプロジェクト変数を選択してください。チェックした変数がデプロイ時に注入されます。</p>
+                    </div>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      loading={savingSelection}
+                      onClick={async () => {
+                        setSavingSelection(true);
+                        try {
+                          await apiSetSelectedProjectEnvVarKeys(project.id, initialContainer.id, selectedProjectEnvVarKeys);
+                          toastSuccess('選択を保存しました');
+                        } catch (e: unknown) {
+                          toastError(e instanceof Error ? e.message : '保存に失敗しました');
+                        } finally {
+                          setSavingSelection(false);
+                        }
+                      }}
+                    >
+                      保存
+                    </Button>
+                  </div>
+                  {projectEnvVars.length === 0 ? (
+                    <div className="border-2 border-dashed border-gray-200 rounded-xl py-8 text-center bg-gray-50">
+                      <p className="text-sm text-gray-400">プロジェクト変数がありません</p>
+                      <p className="text-xs text-gray-400 mt-1">プロジェクト設定から変数を追加してください</p>
+                    </div>
+                  ) : (
+                    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-gray-100 bg-gray-50">
+                            <th className="px-4 py-2.5 w-10" />
+                            <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500">キー</th>
+                            <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500">値</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {projectEnvVars.map((pev) => {
+                            const isSelected = selectedProjectEnvVarKeys.includes(pev.key);
+                            return (
+                              <tr
+                                key={pev.key}
+                                className={`border-b border-gray-50 last:border-0 cursor-pointer transition-colors ${isSelected ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-gray-50'}`}
+                                onClick={() => {
+                                  setSelectedProjectEnvVarKeys((prev) =>
+                                    isSelected ? prev.filter((k) => k !== pev.key) : [...prev, pev.key]
+                                  );
+                                }}
+                              >
+                                <td className="px-4 py-2.5">
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => {}}
+                                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                  />
+                                </td>
+                                <td className="px-4 py-2.5 font-mono text-xs text-gray-800">{pev.key}</td>
+                                <td className="px-4 py-2.5 font-mono text-xs text-gray-500 max-w-xs truncate">
+                                  {'•'.repeat(Math.min(pev.value.length, 16))}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                      <div className="px-4 py-2 border-t border-gray-100 bg-gray-50 text-xs text-gray-500">
+                        {selectedProjectEnvVarKeys.length} / {projectEnvVars.length} 件を選択中
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <div className="bg-white border border-gray-200 rounded-xl p-4">
-                  <EnvVarEditor
-                    envVars={envVars}
-                    onSave={handleSaveEnvVars}
-                    onEditingChange={setEnvVarsEditing}
-                  />
+
+                {/* コンテナ固有変数 */}
+                <div>
+                  <div className="mb-3">
+                    <h2 className="text-base font-semibold text-gray-800">コンテナ変数</h2>
+                    <p className="text-xs text-gray-500">このコンテナにのみ適用される変数。プロジェクト変数と同名のキーはこちらが優先されます。</p>
+                  </div>
+                  <div className="bg-white border border-gray-200 rounded-xl p-4">
+                    <EnvVarEditor
+                      envVars={envVars}
+                      onSave={handleSaveEnvVars}
+                      onEditingChange={setEnvVarsEditing}
+                    />
+                  </div>
                 </div>
               </div>
             )}
