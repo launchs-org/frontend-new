@@ -1,11 +1,10 @@
-import React, { useEffect, useState } from 'react';
-import type { Project } from '../lib/types';
+import React, { useEffect, useRef, useState } from 'react';
+import type { Project, ProjectStatus } from '../lib/types';
 import { listProjects, createProject } from '../services/projects';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { Spinner } from '../components/ui/Spinner';
 import { EmptyState } from '../components/ui/EmptyState';
-import { StatusDot } from '../components/ui/StatusDot';
 import { TopBar } from '../components/layout/TopBar';
 import { toastError, toastSuccess } from '../components/ui/Toast';
 import { formatRelativeTime } from '../lib/utils';
@@ -25,25 +24,45 @@ function getProjectColor(name: string): string {
   return PROJECT_COLORS[Math.abs(hash) % PROJECT_COLORS.length];
 }
 
+type StatusMeta = { label: string; spinning: boolean; color: string; textColor: string };
+
+function getStatusMeta(status: ProjectStatus): StatusMeta {
+  switch (status) {
+    case 'pending':
+      return { label: 'プロビジョニング中', spinning: true, color: 'bg-blue-50 border-blue-200', textColor: 'text-blue-600' };
+    case 'active':
+      return { label: 'アクティブ', spinning: false, color: '', textColor: 'text-green-600' };
+    case 'terminating':
+      return { label: '削除中', spinning: true, color: 'bg-red-50 border-red-200', textColor: 'text-red-500' };
+    case 'failed':
+      return { label: 'エラー', spinning: false, color: 'bg-red-50 border-red-200', textColor: 'text-red-600' };
+  }
+}
+
 export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onSelectProject }) => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const fetchProjects = async () => {
+  const fetchProjects = async (initial = false) => {
     try {
       const data = await listProjects();
       setProjects(data);
     } catch (e: unknown) {
-      toastError(e instanceof Error ? e.message : 'プロジェクトの取得に失敗しました');
+      if (initial) toastError(e instanceof Error ? e.message : 'プロジェクトの取得に失敗しました');
     } finally {
-      setLoading(false);
+      if (initial) setLoading(false);
     }
   };
 
-  useEffect(() => { fetchProjects(); }, []);
+  useEffect(() => {
+    fetchProjects(true);
+    timerRef.current = setInterval(() => fetchProjects(), 5000);
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, []);
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
@@ -78,7 +97,6 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onSelectProject }) =
       />
 
       <div className="flex-1 p-6">
-        {/* Page header */}
         <div className="mb-6">
           <h1 className="text-xl font-semibold text-gray-800">プロジェクト</h1>
           <p className="text-sm text-gray-500 mt-0.5">コンテナをプロジェクト単位で管理します</p>
@@ -102,11 +120,17 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onSelectProject }) =
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {projects.map((p) => {
               const colorClass = getProjectColor(p.name);
+              const isActive = p.status === 'active';
+              const meta = getStatusMeta(p.status);
               return (
                 <div
                   key={p.id}
-                  onClick={() => onSelectProject(p)}
-                  className="bg-white border border-gray-200 rounded-xl cursor-pointer hover:shadow-md hover:border-blue-300 transition-all duration-200 overflow-hidden"
+                  onClick={() => isActive && onSelectProject(p)}
+                  className={`bg-white border rounded-xl overflow-hidden transition-all duration-200 ${
+                    isActive
+                      ? 'border-gray-200 cursor-pointer hover:shadow-md hover:border-blue-300'
+                      : `${meta.color} border cursor-not-allowed opacity-80`
+                  }`}
                 >
                   {/* Color bar */}
                   <div className={`h-1.5 w-full ${colorClass}`} />
@@ -123,7 +147,23 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onSelectProject }) =
                           <p className="text-[11px] text-gray-400 font-mono truncate">{p.slug}</p>
                         </div>
                       </div>
-                      <StatusDot status={p.container_count > 0 ? 'running' : 'stopped'} />
+
+                      {/* Status badge */}
+                      <div className={`flex items-center gap-1 shrink-0 ${meta.textColor}`}>
+                        {meta.spinning && (
+                          <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                          </svg>
+                        )}
+                        {!meta.spinning && p.status === 'active' && (
+                          <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
+                        )}
+                        {!meta.spinning && p.status === 'failed' && (
+                          <span className="w-2 h-2 rounded-full bg-red-500 inline-block" />
+                        )}
+                        <span className="text-[11px] font-medium">{meta.label}</span>
+                      </div>
                     </div>
 
                     {/* Stats */}

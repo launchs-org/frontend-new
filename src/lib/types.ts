@@ -2,10 +2,13 @@
 // Core Types derived from OpenAPI specification
 // ============================================================
 
+export type ProjectStatus = 'pending' | 'active' | 'terminating' | 'failed';
+
 export type ContainerStatus =
   | 'pending'
   | 'building'
   | 'deploying'
+  | 'applying'
   | 'running'
   | 'scaling'
   | 'failed'
@@ -39,6 +42,7 @@ export interface Project {
   name: string;
   slug: string;
   namespace: string;
+  status: ProjectStatus;
   container_count: number;
   last_deployed_at: string | null;
   created_at: string;
