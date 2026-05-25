@@ -54,7 +54,9 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
   const [detail, setDetail] = useState<ContainerDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [redeploying, setRedeploying] = useState(false);
+  const [redeployConfirmOpen, setRedeployConfirmOpen] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
+  const [rebuildConfirmOpen, setRebuildConfirmOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [scaleOpen, setScaleOpen] = useState(false);
@@ -158,6 +160,7 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
   }, [tab, project.id, initialContainer.id, envVarsEditing]);
 
   const handleRedeploy = async () => {
+    setRedeployConfirmOpen(false);
     setRedeploying(true);
     try {
       await redeployContainer(project.id, initialContainer.id);
@@ -170,6 +173,7 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
   };
 
   const handleRebuild = async () => {
+    setRebuildConfirmOpen(false);
     setRebuilding(true);
     try {
       await rebuildContainer(project.id, initialContainer.id);
@@ -320,9 +324,12 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
       const jobs = await listBuildJobs(project.id, initialContainer.id);
       setBuildJobs(jobs);
       setBuildLogJob((prev) => {
-        if (!prev) return prev;
-        const updated = jobs.find((j) => j.id === prev.id);
-        return updated ?? prev;
+        if (prev) {
+          const updated = jobs.find((j) => j.id === prev.id);
+          return updated ?? prev;
+        }
+        // 未選択なら最新ジョブを自動選択
+        return jobs.length > 0 ? jobs[0] : null;
       });
     } catch {
       // silent
@@ -379,13 +386,13 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
               スケール
             </Button>
             {detail?.git_repo && (
-              <Button variant="primary" size="sm" onClick={handleRebuild} loading={rebuilding}
+              <Button variant="primary" size="sm" onClick={() => setRebuildConfirmOpen(true)} loading={rebuilding}
                 icon={<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>}
               >
                 再ビルド
               </Button>
             )}
-            <Button variant="primary" size="sm" onClick={handleRedeploy} loading={redeploying}
+            <Button variant="primary" size="sm" onClick={() => setRedeployConfirmOpen(true)} loading={redeploying}
               icon={<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>}
             >
               再デプロイ
@@ -507,129 +514,118 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
 
             {/* ビルドジョブ */}
             {tab === 'buildjobs' && (
-              <div className="flex gap-4 flex-1 min-h-0">
-                {/* 左: ジョブ一覧 */}
-                <div className="w-72 shrink-0 flex flex-col min-h-0">
-                  <div className="flex items-center justify-between mb-2 shrink-0">
-                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">ビルド履歴 ({buildJobs.length})</p>
-                    <span className="flex items-center gap-1 text-[10px] text-green-500">
-                      <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-                      ライブ
+              <div className="flex-1 flex flex-col min-h-0" style={{ minHeight: '500px' }}>
+                {/* ログビューア（ターミナル風） */}
+                <div className="flex-1 min-h-0 bg-gray-900 rounded-xl overflow-hidden flex flex-col">
+                  {/* ツールバー */}
+                  <div className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-700 bg-gray-800 shrink-0">
+                    {/* ジョブセレクト */}
+                    <div className="flex items-center gap-2 shrink-0">
+                      {(buildLogJob?.status === 'pending' || buildLogJob?.status === 'running') && (
+                        <span className="flex items-center gap-1 text-[10px] text-green-400">
+                          <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                          実行中
+                        </span>
+                      )}
+                      <select
+                        value={buildLogJob?.id ?? ''}
+                        onChange={(e) => {
+                          const job = buildJobs.find((j) => j.id === e.target.value);
+                          if (job) openBuildLog(job);
+                        }}
+                        className="bg-gray-700 border border-gray-600 rounded-lg px-2.5 py-1 text-xs font-mono text-gray-200 focus:outline-none focus:border-blue-500"
+                      >
+                        {buildJobs.length === 0 ? (
+                          <option value="">ビルド履歴なし</option>
+                        ) : (
+                          buildJobs.map((j) => (
+                            <option key={j.id} value={j.id}>
+                              [{j.status}] {j.git_branch || 'unknown'}{j.git_commit ? ` (${j.git_commit.slice(0, 7)})` : ''} — {j.started_at ? formatRelativeTime(j.started_at) : formatRelativeTime(j.created_at)}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    </div>
+
+                    {/* 検索 */}
+                    <div className="flex-1 relative">
+                      <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                      </svg>
+                      <input
+                        type="text"
+                        value={buildLogSearch}
+                        onChange={(e) => setBuildLogSearch(e.target.value)}
+                        placeholder="ログを絞り込む..."
+                        className="w-full bg-gray-700 border border-gray-600 rounded-lg pl-8 pr-3 py-1 text-xs font-mono text-gray-200 placeholder:text-gray-500 focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+
+                    {/* 自動スクロールトグル */}
+                    <button
+                      onClick={() => setBuildLogAutoScroll((v) => !v)}
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${buildLogAutoScroll ? 'bg-green-900 text-green-400' : 'bg-gray-700 text-gray-400'}`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${buildLogAutoScroll ? 'bg-green-400 animate-pulse' : 'bg-gray-500'}`} />
+                      自動スクロール
+                    </button>
+
+                    {/* 件数 */}
+                    <span className="text-[11px] text-gray-500 shrink-0">
+                      {buildLogs.filter((l) => !buildLogSearch || l.message.toLowerCase().includes(buildLogSearch.toLowerCase())).length} 件
                     </span>
                   </div>
-                  <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-1">
-                    {buildJobs.length === 0 ? (
-                      <div className="text-center py-12 text-gray-400 text-sm">ビルド履歴がありません</div>
-                    ) : (
-                      buildJobs.map((j) => (
-                        <button
-                          key={j.id}
-                          onClick={() => openBuildLog(j)}
-                          className={`w-full text-left px-3 py-2.5 rounded-xl border transition-all shrink-0 ${buildLogJob?.id === j.id
-                              ? 'border-blue-500 bg-blue-50'
-                              : 'border-gray-200 bg-white hover:border-blue-300 hover:bg-gray-50'
-                            }`}
-                        >
-                          <div className="flex items-center justify-between gap-2 mb-1">
-                            <Badge status={j.status} />
-                            <span className="text-[10px] text-gray-400 shrink-0">{j.started_at ? formatDate(j.started_at) : formatDate(j.created_at)}</span>
-                          </div>
-                          <p className="text-xs text-gray-600 truncate">{j.git_branch || 'unknown'}</p>
-                          {j.git_commit && (
-                            <p className="text-[10px] font-mono text-gray-400 mt-0.5">{j.git_commit.slice(0, 7)}</p>
-                          )}
-                        </button>
-                      ))
-                    )}
-                  </div>
-                </div>
 
-                {/* 右: ログ表示 */}
-                <div className="flex-1 min-h-0 bg-gray-900 rounded-xl overflow-hidden flex flex-col">
+                  {/* ログ本体 */}
                   {!buildLogJob ? (
-                    <div className="flex items-center justify-center h-full text-gray-500 text-sm">
-                      ← ビルドジョブを選択してください
+                    <div className="flex items-center justify-center flex-1 text-gray-500 text-sm">
+                      ビルド履歴がありません
+                    </div>
+                  ) : buildLogsLoading ? (
+                    <div className="flex items-center justify-center flex-1">
+                      <div className="w-6 h-6 border-2 border-gray-700 border-t-blue-500 rounded-full animate-spin" />
+                    </div>
+                  ) : buildLogs.length === 0 ? (
+                    <div className="flex items-center justify-center flex-1 text-gray-500 text-sm">
+                      ログがありません
                     </div>
                   ) : (
-                    <>
-                      {/* ツールバー */}
-                      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-700 bg-gray-800 shrink-0">
-                        {/* 検索 */}
-                        <div className="flex-1 relative">
-                          <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                          </svg>
-                          <input
-                            type="text"
-                            value={buildLogSearch}
-                            onChange={(e) => setBuildLogSearch(e.target.value)}
-                            placeholder="ログを絞り込む..."
-                            className="w-full bg-gray-700 border border-gray-600 rounded-lg pl-8 pr-3 py-1 text-xs font-mono text-gray-200 placeholder:text-gray-500 focus:outline-none focus:border-blue-500"
-                          />
-                        </div>
-                        {/* 自動スクロールトグル */}
-                        <button
-                          onClick={() => setBuildLogAutoScroll((v) => !v)}
-                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all ${buildLogAutoScroll ? 'bg-green-900 text-green-400' : 'bg-gray-700 text-gray-400'
-                            }`}
-                        >
-                          <span className={`w-1.5 h-1.5 rounded-full ${buildLogAutoScroll ? 'bg-green-400 animate-pulse' : 'bg-gray-500'}`} />
-                          自動スクロール
-                        </button>
-                        {/* 件数 */}
-                        <span className="text-[11px] text-gray-500 shrink-0">
-                          {buildLogs.filter((l) => !buildLogSearch || l.message.toLowerCase().includes(buildLogSearch.toLowerCase())).length} 件
-                        </span>
-                      </div>
+                    <div
+                      ref={buildLogScrollRef}
+                      onWheel={(e) => { if (e.deltaY < 0) setBuildLogAutoScroll(false); }}
+                      className="flex-1 min-h-0 overflow-y-auto p-4 font-mono text-xs leading-relaxed"
+                    >
+                      {buildLogs
+                        .filter((l) => !buildLogSearch || l.message.toLowerCase().includes(buildLogSearch.toLowerCase()))
+                        .map((line, idx) => (
+                          <div key={idx} className={`flex gap-3 py-0.5 ${line.level === 'ERROR' ? 'text-red-400' : line.level === 'WARN' ? 'text-yellow-400' : 'text-gray-300'}`}>
+                            <span className="text-gray-600 shrink-0 select-none tabular-nums">
+                              {new Date(line.timestamp).toLocaleTimeString('ja-JP', { hour12: false })}
+                            </span>
+                            <span className="whitespace-pre-wrap break-all">{line.message}</span>
+                          </div>
+                        ))
+                      }
+                      <div ref={buildLogBottomRef} />
+                    </div>
+                  )}
 
-                      {/* ログ本体 */}
-                      {buildLogsLoading ? (
-                        <div className="flex items-center justify-center flex-1">
-                          <div className="w-6 h-6 border-2 border-gray-700 border-t-blue-500 rounded-full animate-spin" />
-                        </div>
-                      ) : buildLogs.length === 0 ? (
-                        <div className="flex items-center justify-center flex-1 text-gray-500 text-sm">
-                          ログがありません
-                        </div>
-                      ) : (
-                        <div
-                          ref={buildLogScrollRef}
-                          onWheel={(e) => { if (e.deltaY < 0) setBuildLogAutoScroll(false); }}
-                          className="flex-1 min-h-0 overflow-y-auto p-4 font-mono text-xs leading-relaxed"
-                        >
-                          {buildLogs
-                            .filter((l) => !buildLogSearch || l.message.toLowerCase().includes(buildLogSearch.toLowerCase()))
-                            .map((line, idx) => (
-                              <div key={idx} className={`flex gap-3 py-0.5 ${line.level === 'ERROR' ? 'text-red-400' : line.level === 'WARN' ? 'text-yellow-400' : 'text-gray-300'}`}>
-                                <span className="text-gray-600 shrink-0 select-none tabular-nums">
-                                  {new Date(line.timestamp).toLocaleTimeString('ja-JP', { hour12: false })}
-                                </span>
-                                <span className="whitespace-pre-wrap break-all">{line.message}</span>
-                              </div>
-                            ))
-                          }
-                          <div ref={buildLogBottomRef} />
-                        </div>
-                      )}
-
-                      {/* 最下部へスクロールボタン */}
-                      {!buildLogAutoScroll && buildLogs.length > 0 && (
-                        <div className="shrink-0 flex justify-center py-2 border-t border-gray-700 bg-gray-800">
-                          <button
-                            onClick={() => {
-                              setBuildLogAutoScroll(true);
-                              buildLogBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-                            }}
-                            className="text-[11px] text-blue-400 hover:text-blue-300 flex items-center gap-1"
-                          >
-                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-                            </svg>
-                            最下部へスクロール
-                          </button>
-                        </div>
-                      )}
-                    </>
+                  {/* 最下部へスクロールボタン */}
+                  {!buildLogAutoScroll && buildLogs.length > 0 && (
+                    <div className="shrink-0 flex justify-center py-2 border-t border-gray-700 bg-gray-800">
+                      <button
+                        onClick={() => {
+                          setBuildLogAutoScroll(true);
+                          buildLogBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+                        }}
+                        className="text-[11px] text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                        </svg>
+                        最下部へスクロール
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -894,6 +890,22 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
           </div>
         </div>
       </Modal>
+
+      {/* 再デプロイ確認 */}
+      <ConfirmModal
+        open={redeployConfirmOpen} onClose={() => setRedeployConfirmOpen(false)} onConfirm={handleRedeploy}
+        title="再デプロイの確認"
+        message={`"${initialContainer.name}" を再デプロイしますか？現在動作中のコンテナが一時的に再起動されます。`}
+        confirmLabel="再デプロイする" loading={redeploying}
+      />
+
+      {/* 再ビルド確認 */}
+      <ConfirmModal
+        open={rebuildConfirmOpen} onClose={() => setRebuildConfirmOpen(false)} onConfirm={handleRebuild}
+        title="再ビルドの確認"
+        message={`"${initialContainer.name}" を再ビルドしますか？新しいビルドジョブが作成され、完了後に自動デプロイされます。`}
+        confirmLabel="再ビルドする" loading={rebuilding}
+      />
 
       {/* 削除確認 */}
       <ConfirmModal
