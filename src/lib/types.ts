@@ -155,6 +155,7 @@ export interface NetworkRoute {
   port: number;
   protocol: string;
   subdomain: string | null;
+  cluster_ip: string | null;
   created_at: string;
 }
 

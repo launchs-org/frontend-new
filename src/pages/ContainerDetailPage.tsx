@@ -810,6 +810,12 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
                     columns={[
                       { key: 'port', header: 'ポート', render: (r) => <span className="font-mono font-semibold text-gray-800">:{r.port}</span> },
                       { key: 'protocol', header: 'プロトコル', render: (r) => <span className="text-gray-600 text-xs font-mono">{r.protocol || '—'}</span> },
+                      {
+                        key: 'cluster_ip', header: 'Cluster IP',
+                        render: (r) => r.cluster_ip
+                          ? <span className="font-mono text-xs text-gray-800">{r.cluster_ip}:{r.port}</span>
+                          : <span className="text-gray-400 text-xs">割り当て中…</span>,
+                      },
                       { key: 'created', header: '作成日', render: (r) => <span className="text-gray-400 text-xs">{formatDate(r.created_at)}</span> },
                       {
                         key: 'actions', header: '',
