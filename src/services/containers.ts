@@ -16,6 +16,7 @@ import type {
   Mount,
   CreateMountRequest,
   BuildJob,
+  ContainerStatusHistory,
 } from '../lib/types';
 
 export async function listContainers(projectId: string): Promise<ContainerSummary[]> {
@@ -172,4 +173,14 @@ export async function listBuildJobs(projectId: string, containerId: string): Pro
 
 export async function cancelBuildJob(projectId: string, buildJobId: string): Promise<void> {
   return del(`/projects/${projectId}/build-jobs/${buildJobId}`);
+}
+
+// Status Histories
+export async function listStatusHistories(
+  projectId: string,
+  containerId: string
+): Promise<ContainerStatusHistory[]> {
+  return get<ContainerStatusHistory[]>(
+    `/projects/${projectId}/containers/${containerId}/status-histories`
+  );
 }

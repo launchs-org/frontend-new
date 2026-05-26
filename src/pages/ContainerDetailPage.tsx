@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import type {
   ContainerDetail, ContainerSummary, EnvVar,
-  NetworkRoute, Mount, BuildJob, Volume,
+  NetworkRoute, Mount, BuildJob, Volume, ContainerStatusHistory,
 } from '../lib/types';
 import {
   getContainer, redeployContainer, rebuildContainer, deleteContainer, scaleContainer,
@@ -10,6 +10,7 @@ import {
   listPorts,
   listRoutes, createServiceRoute, createIngressRoute, deleteRoute,
   createMount, deleteMount, listBuildJobs, cancelBuildJob,
+  listStatusHistories,
 } from '../services/containers';
 import { listProjectEnvVars } from '../services/projects';
 import { listVolumes } from '../services/volumes';
@@ -29,7 +30,7 @@ import { toastError, toastSuccess } from '../components/ui/Toast';
 import { formatDate, formatRelativeTime } from '../lib/utils';
 import type { Project } from '../lib/types';
 
-type Tab = 'overview' | 'logs' | 'metrics' | 'buildjobs' | 'envvars' | 'network' | 'mounts';
+type Tab = 'overview' | 'logs' | 'metrics' | 'buildjobs' | 'envvars' | 'network' | 'mounts' | 'events';
 
 interface ContainerDetailPageProps {
   project: Project;
@@ -45,7 +46,7 @@ const labelCls = "block text-sm font-medium text-gray-700 mb-1.5";
 export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
   project, container: initialContainer, initialTab, onBack, onTabChange,
 }) => {
-  const validTabs: Tab[] = ['overview', 'logs', 'metrics', 'buildjobs', 'envvars', 'network', 'mounts'];
+  const validTabs: Tab[] = ['overview', 'logs', 'metrics', 'buildjobs', 'envvars', 'network', 'mounts', 'events'];
   const resolvedInitialTab = (validTabs.includes(initialTab as Tab) ? initialTab : 'overview') as Tab;
   const [tab, setTabState] = useState<Tab>(resolvedInitialTab);
 
@@ -79,6 +80,8 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
   const [mountForm, setMountForm] = useState({ volume_id: '', mount_path: '' });
   const [creatingMount, setCreatingMount] = useState(false);
 
+  const [statusHistories, setStatusHistories] = useState<ContainerStatusHistory[]>([]);
+
   const [buildJobs, setBuildJobs] = useState<BuildJob[]>([]);
   const [buildLogJob, setBuildLogJob] = useState<BuildJob | null>(null);
   const [buildLogs, setBuildLogs] = useState<import('../lib/types').LogLine[]>([]);
@@ -103,7 +106,7 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [det, ev, pev, sel, , rt, bj, vol] = await Promise.allSettled([
+      const [det, ev, pev, sel, , rt, bj, vol, sh] = await Promise.allSettled([
         getContainer(project.id, initialContainer.id),
         listContainerEnvVars(project.id, initialContainer.id),
         listProjectEnvVars(project.id),
@@ -112,6 +115,7 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
         listRoutes(project.id, initialContainer.id),
         listBuildJobs(project.id, initialContainer.id),
         listVolumes(project.id),
+        listStatusHistories(project.id, initialContainer.id),
       ]);
       if (det.status === 'fulfilled') {
         setDetail(det.value);
@@ -126,6 +130,7 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
         setVolumes(vol.value);
         setMounts(extractMountsFromVolumes(vol.value));
       }
+      if (sh.status === 'fulfilled') setStatusHistories(sh.value);
     } finally {
       setLoading(false);
     }
@@ -144,7 +149,10 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
         const updated = await getContainer(pid, cid);
         setDetail(updated);
 
-        if (tab === 'network') {
+        if (tab === 'events') {
+          const histories = await listStatusHistories(pid, cid);
+          setStatusHistories(histories);
+        } else if (tab === 'network') {
           const [, rts] = await Promise.all([listPorts(pid, cid), listRoutes(pid, cid)]);
           setRoutes(rts);
         } else if (tab === 'mounts') {
@@ -378,6 +386,7 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
     { key: 'envvars', label: '環境変数' },
     { key: 'network', label: 'ネットワーク' },
     { key: 'mounts', label: 'マウント' },
+    { key: 'events', label: 'イベント' },
   ];
 
   const container = detail ?? initialContainer;
@@ -920,6 +929,61 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
                   keyExtractor={(m) => m.id}
                   emptyMessage="マウントされていません"
                 />
+              </div>
+            )}
+
+            {/* イベントログ */}
+            {tab === 'events' && (
+              <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                <div className="px-5 py-4 border-b border-gray-100">
+                  <h2 className="text-sm font-semibold text-gray-800">ステータス変化ログ</h2>
+                  <p className="text-xs text-gray-500 mt-0.5">過去1週間のコンテナステータス変化を記録しています</p>
+                </div>
+                {statusHistories.length === 0 ? (
+                  <div className="px-5 py-12 text-center text-sm text-gray-400">イベントはありません</div>
+                ) : (
+                  <div className="divide-y divide-gray-50">
+                    {statusHistories.map((h, idx) => {
+                      const isFirst = idx === 0;
+                      const statusColor: Record<string, string> = {
+                        running: 'bg-green-100 text-green-700',
+                        failed: 'bg-red-100 text-red-700',
+                        pending: 'bg-yellow-100 text-yellow-700',
+                        stopped: 'bg-gray-100 text-gray-600',
+                        deploying: 'bg-blue-100 text-blue-700',
+                        building: 'bg-purple-100 text-purple-700',
+                        scaling: 'bg-blue-100 text-blue-700',
+                        applying: 'bg-blue-100 text-blue-700',
+                      };
+                      const colorCls = statusColor[h.status] ?? 'bg-gray-100 text-gray-600';
+                      return (
+                        <div key={h.id} className={`flex items-start gap-4 px-5 py-3.5 ${isFirst ? 'bg-blue-50/40' : ''}`}>
+                          <div className="flex flex-col items-center pt-1 gap-1">
+                            <div className={`w-2 h-2 rounded-full flex-shrink-0 ${isFirst ? 'bg-blue-500' : 'bg-gray-300'}`} />
+                            {idx < statusHistories.length - 1 && (
+                              <div className="w-px flex-1 min-h-[16px] bg-gray-200" />
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${colorCls}`}>
+                                {h.status}
+                              </span>
+                              <span className="text-xs text-gray-500 font-mono">
+                                Ready: {h.ready_replicas}/{h.replicas}
+                                {h.failed_replicas > 0 && (
+                                  <span className="ml-2 text-red-500">Failed: {h.failed_replicas}</span>
+                                )}
+                              </span>
+                            </div>
+                            <p className="text-xs text-gray-400 mt-0.5">{formatDate(h.created_at)}</p>
+                          </div>
+                          <span className="text-xs text-gray-400 flex-shrink-0 pt-0.5">{formatRelativeTime(h.created_at)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </>

@@ -146,6 +146,19 @@ export interface CreatePortRequest {
 }
 
 // ============================================================
+// ContainerStatusHistory
+// ============================================================
+
+export interface ContainerStatusHistory {
+  id: string;
+  status: string;
+  replicas: number;
+  ready_replicas: number;
+  failed_replicas: number;
+  created_at: string;
+}
+
+// ============================================================
 // NetworkRoute
 // ============================================================
 
