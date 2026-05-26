@@ -6,7 +6,7 @@ import {
   deleteProject, listProjectEnvVars, upsertProjectEnvVars,
   deleteProjectEnvVars, listJobs, listSnapshots, restoreSnapshot,
 } from '../services/projects';
-import { listContainers, createContainerFromGitHub, createContainerFromTemplate, listBuildJobs } from '../services/containers';
+import { listContainers, createContainerFromGitHub, createContainerFromTemplate, listBuildJobs, cancelBuildJob } from '../services/containers';
 import { listVolumes, createVolume, deleteVolume } from '../services/volumes';
 import { listBranches, listDirectories, parseRepo } from '../services/github';
 import { ContainerCard } from '../components/containers/ContainerCard';
@@ -243,11 +243,13 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
     if (!volumeForm.name.trim()) return;
     setCreatingVolume(true);
     try {
-      const v = await createVolume(project.id, {
+      await createVolume(project.id, {
         name: volumeForm.name,
         size_mb: parseInt(volumeForm.size_mb, 10) || 1024,
       });
-      setVolumes((prev) => [...prev, v]);
+      // 作成後にリスト再取得して正確な size_mb などを反映
+      const updated = await listVolumes(project.id);
+      setVolumes(updated);
       setVolumeCreateOpen(false);
       setVolumeForm({ name: '', size_mb: '1024' });
       toastSuccess('ボリュームを作成しました');
@@ -509,6 +511,30 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
                         { key: 'commit', header: 'コミット', render: (j) => j.git_commit ? <span className="font-mono text-xs text-gray-500">{j.git_commit.slice(0, 7)}</span> : <span className="text-gray-300">—</span> },
                         { key: 'started', header: '開始', render: (j) => <span className="text-gray-500 text-xs">{formatDate(j.started_at)}</span> },
                         { key: 'finished', header: '完了', render: (j) => <span className="text-gray-500 text-xs">{formatDate(j.finished_at)}</span> },
+                        {
+                          key: 'actions', header: '',
+                          render: (j) => (j.status === 'pending' || j.status === 'running') ? (
+                            <Button variant="ghost" size="sm" onClick={async () => {
+                              try {
+                                await cancelBuildJob(project.id, j.id);
+                                toastSuccess('ビルドをキャンセルしました');
+                                // ビルドジョブ一覧を再取得
+                                const currentContainers = await listContainers(project.id);
+                                const bjResults = await Promise.allSettled(currentContainers.map((c) => listBuildJobs(project.id, c.id)));
+                                const allBj: BuildJob[] = [];
+                                bjResults.forEach((r) => { if (r.status === 'fulfilled') allBj.push(...r.value); });
+                                allBj.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+                                setBuildJobs(allBj);
+                              } catch (e: unknown) {
+                                toastError(e instanceof Error ? e.message : 'キャンセルに失敗しました');
+                              }
+                            }}>
+                              <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </Button>
+                          ) : null,
+                        },
                       ]}
                       data={buildJobs}
                       keyExtractor={(j) => j.id}

@@ -13,6 +13,7 @@ const variantStyles: Record<string, string> = {
   pending:   'bg-yellow-100 text-yellow-800 ring-1 ring-yellow-200',
   building:  'bg-blue-100 text-blue-800 ring-1 ring-blue-200',
   deploying: 'bg-blue-100 text-blue-800 ring-1 ring-blue-200',
+  applying:  'bg-indigo-100 text-indigo-800 ring-1 ring-indigo-200',
   scaling:   'bg-purple-100 text-purple-800 ring-1 ring-purple-200',
   Pending:   'bg-yellow-100 text-yellow-800 ring-1 ring-yellow-200',
 
@@ -40,6 +41,7 @@ const labelMap: Record<string, string> = {
   pending:   '待機中',
   building:  'ビルド中',
   deploying: 'デプロイ中',
+  applying:  '反映中',
   scaling:   'スケール中',
   Pending:   '待機中',
   failed:    '失敗',

@@ -169,3 +169,7 @@ export async function deleteMount(
 export async function listBuildJobs(projectId: string, containerId: string): Promise<BuildJob[]> {
   return get<BuildJob[]>(`/projects/${projectId}/containers/${containerId}/build-jobs`);
 }
+
+export async function cancelBuildJob(projectId: string, buildJobId: string): Promise<void> {
+  return del(`/projects/${projectId}/build-jobs/${buildJobId}`);
+}

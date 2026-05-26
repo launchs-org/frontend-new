@@ -9,7 +9,7 @@ import {
   getSelectedProjectEnvVarKeys, setSelectedProjectEnvVarKeys as apiSetSelectedProjectEnvVarKeys,
   listPorts,
   listRoutes, createServiceRoute, createIngressRoute, deleteRoute,
-  createMount, deleteMount, listBuildJobs,
+  createMount, deleteMount, listBuildJobs, cancelBuildJob,
 } from '../services/containers';
 import { listProjectEnvVars } from '../services/projects';
 import { listVolumes } from '../services/volumes';
@@ -467,7 +467,7 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
           <>
             {/* 概要 */}
             {tab === 'overview' && detail && (
-              <div className="space-y-4 max-w-4xl">
+              <div className="space-y-4 max-w-6xl">
                 {/* Info cards */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <InfoCard label="リソースサイズ" value={detail.resource_size} />
@@ -582,6 +582,29 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
                       <span className={`w-1.5 h-1.5 rounded-full ${buildLogAutoScroll ? 'bg-green-400 animate-pulse' : 'bg-gray-500'}`} />
                       自動スクロール
                     </button>
+
+                    {/* キャンセル */}
+                    {(buildLogJob?.status === 'pending' || buildLogJob?.status === 'running') && (
+                      <button
+                        onClick={async () => {
+                          if (!buildLogJob) return;
+                          try {
+                            await cancelBuildJob(project.id, buildLogJob.id);
+                            toastSuccess('ビルドをキャンセルしました');
+                            await refreshBuildJobs();
+                          } catch (e: unknown) {
+                            toastError(e instanceof Error ? e.message : 'キャンセルに失敗しました');
+                          }
+                        }}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-red-900 text-red-400 hover:bg-red-800 transition-all shrink-0"
+                        title="ビルドをキャンセル"
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                        キャンセル
+                      </button>
+                    )}
 
                     {/* ダウンロード */}
                     {buildLogs.length > 0 && (
@@ -865,6 +888,12 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
                   >
                     ボリュームをマウント
                   </Button>
+                </div>
+                <div className="mb-3 px-1 py-2.5 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
+                  <svg className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                  </svg>
+                  <p className="text-xs text-amber-700">マウントの追加・削除を反映するには<strong>再デプロイ</strong>が必要です。自動では再起動されません。</p>
                 </div>
                 <Table
                   columns={[

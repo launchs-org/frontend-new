@@ -9,6 +9,7 @@ const variantMap: Record<string, string> = {
 
   building:  'bg-blue-500 animate-pulse',
   deploying: 'bg-blue-500 animate-pulse',
+  applying:  'bg-indigo-500 animate-pulse',
   scaling:   'bg-purple-500 animate-pulse',
   pending:   'bg-yellow-400 animate-pulse',
   Pending:   'bg-yellow-400 animate-pulse',
