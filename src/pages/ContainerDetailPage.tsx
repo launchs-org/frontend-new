@@ -937,7 +937,11 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
               <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
                 <div className="px-5 py-4 border-b border-gray-100">
                   <h2 className="text-sm font-semibold text-gray-800">ステータス変化ログ</h2>
-                  <p className="text-xs text-gray-500 mt-0.5">過去1週間のコンテナステータス変化を記録しています</p>
+                  <p className="text-xs text-gray-500 mt-1">過去1週間のコンテナステータス変化を記録しています</p>
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+                    <span className="text-xs text-gray-400">コンテナ名: <span className="font-mono text-gray-600">{container.name}</span></span>
+                    <span className="text-xs text-gray-400">コンテナID: <span className="font-mono text-gray-600">{container.id}</span></span>
+                  </div>
                 </div>
                 {statusHistories.length === 0 ? (
                   <div className="px-5 py-12 text-center text-sm text-gray-400">イベントはありません</div>
@@ -976,7 +980,10 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
                                 )}
                               </span>
                             </div>
-                            <p className="text-xs text-gray-400 mt-0.5">{formatDate(h.created_at)}</p>
+                            <div className="flex flex-wrap gap-x-3 mt-0.5">
+                              <p className="text-xs text-gray-400">{formatDate(h.created_at)}</p>
+                              <p className="text-xs text-gray-300 font-mono">event: {h.id}</p>
+                            </div>
                           </div>
                           <span className="text-xs text-gray-400 flex-shrink-0 pt-0.5">{formatRelativeTime(h.created_at)}</span>
                         </div>
