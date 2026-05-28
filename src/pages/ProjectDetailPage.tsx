@@ -71,7 +71,7 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
   const [selectedTemplateDetail, setSelectedTemplateDetail] = useState<TemplateDetail | null>(null);
   const [loadingTemplateDetail, setLoadingTemplateDetail] = useState(false);
   const [templateParams, setTemplateParams] = useState<Record<string, string>>({});
-  const [createVolume, setCreateVolume] = useState(false);
+  const [shouldCreateVolume, setShouldCreateVolume] = useState(false);
   const [volumeSize, setVolumeSize] = useState<number>(0);
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
 
@@ -269,7 +269,7 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
         }
       }
       setTemplateParams(initParams);
-      setCreateVolume(detail.volume?.required ?? false);
+      setShouldCreateVolume(detail.volume?.required ?? false);
       setVolumeSize(detail.volume?.default_size_mb ?? 1024);
     } catch {
       // 取得失敗時は設定フォームなしで続行
@@ -283,7 +283,7 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
     setTemplateForm({ name: '', template_name: '' });
     setSelectedTemplateDetail(null);
     setTemplateParams({});
-    setCreateVolume(false);
+    setShouldCreateVolume(false);
     setVolumeSize(0);
   };
 
@@ -295,8 +295,8 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
         name: templateForm.name,
         template_name: templateForm.template_name,
         params: Object.keys(templateParams).length > 0 ? templateParams : undefined,
-        create_volume: createVolume || undefined,
-        volume_size: createVolume ? volumeSize : undefined,
+        create_volume: shouldCreateVolume || undefined,
+        volume_size: shouldCreateVolume ? volumeSize : undefined,
       });
       setContainers((prev) => [...prev, c]);
       closeTemplateModal();
@@ -755,7 +755,7 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
             <Button variant="primary" onClick={handleCreateFromTemplate} loading={creating}
               disabled={
                 !templateForm.name.trim() || !templateForm.template_name ||
-                (createVolume && appConfig !== null && (
+                (shouldCreateVolume && appConfig !== null && (
                   volumeSize < appConfig.min_volume_size_mb || volumeSize > appConfig.max_volume_size_mb
                 ))
               }
@@ -856,15 +856,15 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
-                      checked={createVolume}
-                      onChange={(e) => setCreateVolume(e.target.checked)}
+                      checked={shouldCreateVolume}
+                      onChange={(e) => setShouldCreateVolume(e.target.checked)}
                       className="rounded border-gray-300 text-blue-600"
                     />
                     <span className="text-sm font-medium text-gray-700">
                       永続ボリュームを作成する（データを保持）
                     </span>
                   </label>
-                  {createVolume && (
+                  {shouldCreateVolume && (
                     <div className="mt-3">
                       <label className={labelCls}>ボリュームサイズ (MB)</label>
                       <input
