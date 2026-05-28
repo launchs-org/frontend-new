@@ -106,7 +106,7 @@ export interface CreateContainerFromGitHubRequest {
 export interface CreateContainerFromTemplateRequest {
   name: string;
   template_name: string;
-  resource_size?: ResourceSize;
+  // resource_size と replicas は YAML の spec フィールドで決定するためフロントから指定不可
   params?: Record<string, string>;
   create_volume?: boolean;
   volume_size?: number;
