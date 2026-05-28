@@ -46,7 +46,10 @@ const labelCls = "block text-sm font-medium text-gray-700 mb-1.5";
 export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
   project, container: initialContainer, initialTab, onBack, onTabChange,
 }) => {
-  const validTabs: Tab[] = ['overview', 'logs', 'metrics', 'buildjobs', 'envvars', 'network', 'mounts', 'events'];
+  const isTemplate = initialContainer.is_template;
+  const validTabs: Tab[] = isTemplate
+    ? ['overview', 'logs', 'metrics', 'envvars', 'network', 'mounts', 'events']
+    : ['overview', 'logs', 'metrics', 'buildjobs', 'envvars', 'network', 'mounts', 'events'];
   const resolvedInitialTab = (validTabs.includes(initialTab as Tab) ? initialTab : 'overview') as Tab;
   const [tab, setTabState] = useState<Tab>(resolvedInitialTab);
 
@@ -382,7 +385,7 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
     { key: 'overview', label: '概要' },
     { key: 'logs', label: 'ログ' },
     { key: 'metrics', label: 'メトリクス' },
-    { key: 'buildjobs', label: 'ビルド' },
+    ...(!isTemplate ? [{ key: 'buildjobs' as Tab, label: 'ビルド' }] : []),
     { key: 'envvars', label: '環境変数' },
     { key: 'network', label: 'ネットワーク' },
     { key: 'mounts', label: 'マウント' },

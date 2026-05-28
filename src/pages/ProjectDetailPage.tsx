@@ -1,7 +1,11 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import type {
   Project, ContainerSummary, Volume, EnvVar, Job, Snapshot, BuildJob,
+  TemplateSummary, TemplateDetail,
 } from '../lib/types';
+import { listTemplates, getTemplate } from '../services/templates';
+import { getAppConfig } from '../services/config';
+import type { AppConfig } from '../services/config';
 import {
   deleteProject, listProjectEnvVars, upsertProjectEnvVars,
   deleteProjectEnvVars, listJobs, listSnapshots, restoreSnapshot,
@@ -60,6 +64,16 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
   const [githubForm, setGithubForm] = useState({ name: '', git_repo: '', git_branch: 'main', git_subdir: '' });
   const [templateForm, setTemplateForm] = useState({ name: '', template_name: '' });
   const [creating, setCreating] = useState(false);
+
+  // テンプレートモーダル用状態
+  const [templateList, setTemplateList] = useState<TemplateSummary[]>([]);
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
+  const [selectedTemplateDetail, setSelectedTemplateDetail] = useState<TemplateDetail | null>(null);
+  const [loadingTemplateDetail, setLoadingTemplateDetail] = useState(false);
+  const [templateParams, setTemplateParams] = useState<Record<string, string>>({});
+  const [createVolume, setCreateVolume] = useState(false);
+  const [volumeSize, setVolumeSize] = useState<number>(0);
+  const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
 
   // GitHub API ブランチ・ディレクトリ
   const [branches, setBranches] = useState<string[]>([]);
@@ -220,6 +234,59 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
     }
   };
 
+  const generateRandomString = (len: number): string => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+    return Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  };
+
+  const openTemplateModal = async () => {
+    setCreateMode('template');
+    setLoadingTemplates(true);
+    try {
+      const [list, cfg] = await Promise.all([listTemplates(), getAppConfig()]);
+      setTemplateList(list);
+      setAppConfig(cfg);
+    } catch {
+      // 取得失敗はフォールバックなしで表示のみ
+    } finally {
+      setLoadingTemplates(false);
+    }
+  };
+
+  const handleSelectTemplate = async (name: string) => {
+    setTemplateForm((prev) => ({ ...prev, template_name: name }));
+    setSelectedTemplateDetail(null);
+    setLoadingTemplateDetail(true);
+    try {
+      const detail = await getTemplate(name);
+      setSelectedTemplateDetail(detail);
+      const initParams: Record<string, string> = {};
+      for (const ev of detail.env_vars) {
+        if (ev.auto_generate) {
+          initParams[ev.key] = generateRandomString(16);
+        } else {
+          initParams[ev.key] = ev.default ?? '';
+        }
+      }
+      setTemplateParams(initParams);
+      setCreateVolume(detail.volume?.required ?? false);
+      setVolumeSize(detail.volume?.default_size_mb ?? 1024);
+    } catch {
+      // 取得失敗時は設定フォームなしで続行
+    } finally {
+      setLoadingTemplateDetail(false);
+    }
+  };
+
+  const closeTemplateModal = () => {
+    setCreateMode(null);
+    setTemplateForm({ name: '', template_name: '' });
+    setSelectedTemplateDetail(null);
+    setTemplateParams({});
+    setCreateVolume(false);
+    setVolumeSize(0);
+  };
+
   const handleCreateFromTemplate = async () => {
     if (!templateForm.name.trim() || !templateForm.template_name) return;
     setCreating(true);
@@ -227,10 +294,12 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
       const c = await createContainerFromTemplate(project.id, {
         name: templateForm.name,
         template_name: templateForm.template_name,
+        params: Object.keys(templateParams).length > 0 ? templateParams : undefined,
+        create_volume: createVolume || undefined,
+        volume_size: createVolume ? volumeSize : undefined,
       });
       setContainers((prev) => [...prev, c]);
-      setCreateMode(null);
-      setTemplateForm({ name: '', template_name: '' });
+      closeTemplateModal();
       toastSuccess(`コンテナ "${c.name}" を作成しました`);
     } catch (e: unknown) {
       toastError(e instanceof Error ? e.message : 'コンテナ作成に失敗しました');
@@ -383,7 +452,7 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
                     >
                       GitHub からデプロイ
                     </Button>
-                    <Button variant="secondary" size="sm" onClick={() => setCreateMode('template')}
+                    <Button variant="secondary" size="sm" onClick={openTemplateModal}
                       icon={<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5z" /></svg>}
                     >
                       テンプレートから追加
@@ -397,7 +466,7 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
                     action={
                       <div className="flex gap-2">
                         <Button variant="primary" size="sm" onClick={() => setCreateMode('github')}>GitHub からデプロイ</Button>
-                        <Button variant="secondary" size="sm" onClick={() => setCreateMode('template')}>テンプレートから追加</Button>
+                        <Button variant="secondary" size="sm" onClick={openTemplateModal}>テンプレートから追加</Button>
                       </div>
                     }
                   />
@@ -677,55 +746,151 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
       {/* テンプレートから追加モーダル */}
       <Modal
         open={createMode === 'template'}
-        onClose={() => setCreateMode(null)}
+        onClose={closeTemplateModal}
         title="テンプレートからコンテナを追加"
-        size="md"
+        size="lg"
         footer={
           <>
-            <Button variant="secondary" onClick={() => setCreateMode(null)}>キャンセル</Button>
+            <Button variant="secondary" onClick={closeTemplateModal}>キャンセル</Button>
             <Button variant="primary" onClick={handleCreateFromTemplate} loading={creating}
-              disabled={!templateForm.name.trim() || !templateForm.template_name}
+              disabled={
+                !templateForm.name.trim() || !templateForm.template_name ||
+                (createVolume && appConfig !== null && (
+                  volumeSize < appConfig.min_volume_size_mb || volumeSize > appConfig.max_volume_size_mb
+                ))
+              }
             >
               追加
             </Button>
           </>
         }
       >
-        <div className="space-y-4">
-          <div>
-            <label className={labelCls}>コンテナ名</label>
-            <input
-              type="text"
-              value={templateForm.name}
-              onChange={(e) => setTemplateForm((prev) => ({ ...prev, name: e.target.value }))}
-              placeholder="my-db"
-              className={inputCls}
-            />
-          </div>
+        <div className="space-y-5">
+          {/* テンプレート選択 */}
           <div>
             <label className={labelCls}>テンプレートを選択</label>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { name: 'mysql', display_name: 'MySQL', category: 'Database', icon: '🐬' },
-                { name: 'postgres', display_name: 'PostgreSQL', category: 'Database', icon: '🐘' },
-                { name: 'redis', display_name: 'Redis', category: 'Cache', icon: '⚡' },
-              ].map((t) => (
-                <button
-                  key={t.name}
-                  onClick={() => setTemplateForm((prev) => ({ ...prev, template_name: t.name }))}
-                  className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border text-center transition-all
-                    ${templateForm.template_name === t.name
-                      ? 'border-blue-500 bg-blue-50'
-                      : 'border-gray-200 hover:border-blue-300 hover:bg-blue-50/30'
-                    }`}
-                >
-                  <span className="text-2xl">{t.icon}</span>
-                  <p className="text-sm font-medium text-gray-800">{t.display_name}</p>
-                  <p className="text-[11px] text-gray-400">{t.category}</p>
-                </button>
-              ))}
-            </div>
+            {loadingTemplates ? (
+              <div className="flex justify-center py-6"><Spinner /></div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {templateList.map((t) => (
+                  <button
+                    key={t.name}
+                    onClick={() => handleSelectTemplate(t.name)}
+                    className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border text-center transition-all
+                      ${templateForm.template_name === t.name
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-gray-200 hover:border-blue-300 hover:bg-blue-50/30'
+                      }`}
+                  >
+                    <span className="text-2xl">
+                      {t.icon === 'database' ? '🗄️' : t.icon === 'zap' ? '⚡' : t.icon === 'server' ? '🖥️' : t.icon}
+                    </span>
+                    <p className="text-sm font-medium text-gray-800">{t.display_name}</p>
+                    <p className="text-[11px] text-gray-400">{t.category}</p>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
+
+          {/* テンプレート選択後の設定フォーム */}
+          {templateForm.template_name && (
+            <>
+              {/* コンテナ名 */}
+              <div>
+                <label className={labelCls}>コンテナ名</label>
+                <input
+                  type="text"
+                  value={templateForm.name}
+                  onChange={(e) => setTemplateForm((prev) => ({ ...prev, name: e.target.value }))}
+                  placeholder="my-db"
+                  className={inputCls}
+                />
+              </div>
+
+              {/* 環境変数設定 */}
+              {loadingTemplateDetail ? (
+                <div className="flex justify-center py-4"><Spinner /></div>
+              ) : selectedTemplateDetail && selectedTemplateDetail.env_vars.length > 0 && (
+                <div>
+                  <label className={labelCls}>設定項目</label>
+                  <div className="space-y-2 rounded-lg border border-gray-200 p-3 bg-gray-50">
+                    {selectedTemplateDetail.env_vars.map((ev) => (
+                      <div key={ev.key} className="flex items-center gap-2">
+                        <div className="w-40 shrink-0">
+                          <p className="text-xs font-medium text-gray-700 truncate">
+                            {ev.description || ev.key}
+                            {ev.required && <span className="ml-1 text-red-500">*</span>}
+                          </p>
+                          <p className="text-[10px] text-gray-400">{ev.key}</p>
+                        </div>
+                        <div className="flex-1 flex gap-1">
+                          <input
+                            type={ev.generate_type === 'password' ? 'password' : 'text'}
+                            value={templateParams[ev.key] ?? ''}
+                            onChange={(e) => setTemplateParams((prev) => ({ ...prev, [ev.key]: e.target.value }))}
+                            className={inputCls}
+                            placeholder={ev.default || ''}
+                          />
+                          {ev.auto_generate && (
+                            <button
+                              type="button"
+                              onClick={() => setTemplateParams((prev) => ({ ...prev, [ev.key]: generateRandomString(16) }))}
+                              className="px-2 py-1.5 text-xs rounded-lg border border-gray-300 hover:bg-gray-100 text-gray-500 shrink-0"
+                              title="ランダム生成"
+                            >
+                              🔄
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ボリューム設定 */}
+              {selectedTemplateDetail?.volume && (
+                <div className="rounded-lg border border-gray-200 p-3 bg-gray-50">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={createVolume}
+                      onChange={(e) => setCreateVolume(e.target.checked)}
+                      className="rounded border-gray-300 text-blue-600"
+                    />
+                    <span className="text-sm font-medium text-gray-700">
+                      永続ボリュームを作成する（データを保持）
+                    </span>
+                  </label>
+                  {createVolume && (
+                    <div className="mt-3">
+                      <label className={labelCls}>ボリュームサイズ (MB)</label>
+                      <input
+                        type="number"
+                        value={volumeSize}
+                        onChange={(e) => setVolumeSize(Number(e.target.value))}
+                        min={appConfig?.min_volume_size_mb ?? 10}
+                        max={appConfig?.max_volume_size_mb ?? 3000}
+                        step={512}
+                        className={inputCls}
+                      />
+                      {appConfig && (volumeSize < appConfig.min_volume_size_mb || volumeSize > appConfig.max_volume_size_mb) && (
+                        <p className="mt-1 text-[11px] text-red-500">
+                          {appConfig.min_volume_size_mb}〜{appConfig.max_volume_size_mb} MB の範囲で入力してください
+                        </p>
+                      )}
+                      <p className="mt-1 text-[11px] text-gray-400">
+                        マウントパス: {selectedTemplateDetail.volume.mount_path}
+                        {appConfig && ` (最大 ${appConfig.max_volume_size_mb} MB)`}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
         </div>
       </Modal>
 

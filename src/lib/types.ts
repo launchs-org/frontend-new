@@ -79,6 +79,7 @@ export interface ContainerSummary {
   resource_size: ResourceSize;
   active_deploy_workflow_id: string | null;
   active_scale_workflow_id: string | null;
+  is_template: boolean;
   pods: PodStatus[];
   created_at: string;
   updated_at: string;
@@ -106,6 +107,9 @@ export interface CreateContainerFromTemplateRequest {
   name: string;
   template_name: string;
   resource_size?: ResourceSize;
+  params?: Record<string, string>;
+  create_volume?: boolean;
+  volume_size?: number;
 }
 
 export interface ScaleContainerRequest {
@@ -265,6 +269,33 @@ export interface TemplateSummary {
   version: string;
   icon: string;
   color: string;
+}
+
+export interface TemplateEnvVarDef {
+  key: string;
+  required: boolean;
+  description: string;
+  auto_generate: boolean;
+  generate_type?: string;
+  default: string;
+}
+
+export interface TemplateVolumeDef {
+  required: boolean;
+  mount_path: string;
+  default_size_mb: number;
+}
+
+export interface TemplatePortDef {
+  port: number;
+  protocol: string;
+}
+
+export interface TemplateDetail extends TemplateSummary {
+  image: string;
+  env_vars: TemplateEnvVarDef[];
+  volume?: TemplateVolumeDef;
+  ports?: TemplatePortDef[];
 }
 
 // ============================================================
