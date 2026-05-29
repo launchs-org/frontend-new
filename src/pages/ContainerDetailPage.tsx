@@ -47,7 +47,9 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
   project, container: initialContainer, initialTab, onBack, onTabChange,
 }) => {
   const isTemplate = initialContainer.is_template;
-  const validTabs: Tab[] = isTemplate
+  const isImageDeploy = initialContainer.is_image_deploy;
+  const hideBuildJobs = isTemplate || isImageDeploy;
+  const validTabs: Tab[] = hideBuildJobs
     ? ['overview', 'logs', 'metrics', 'envvars', 'network', 'mounts', 'events']
     : ['overview', 'logs', 'metrics', 'buildjobs', 'envvars', 'network', 'mounts', 'events'];
   const resolvedInitialTab = (validTabs.includes(initialTab as Tab) ? initialTab : 'overview') as Tab;

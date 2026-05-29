@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import type { Project, ProjectStatus } from '../lib/types';
+import type { Project, ProjectStatus, QuotaInfo } from '../lib/types';
 import { listProjects, createProject } from '../services/projects';
+import { getMyQuota } from '../services/quota';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { Spinner } from '../components/ui/Spinner';
@@ -45,6 +46,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onSelectProject }) =
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
+  const [quota, setQuota] = useState<QuotaInfo | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchProjects = async (initial = false) => {
@@ -60,6 +62,7 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onSelectProject }) =
 
   useEffect(() => {
     fetchProjects(true);
+    getMyQuota().then(setQuota).catch(() => {});
     timerRef.current = setInterval(() => fetchProjects(), 5000);
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, []);
@@ -101,6 +104,42 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onSelectProject }) =
           <h1 className="text-xl font-semibold text-gray-800">プロジェクト</h1>
           <p className="text-sm text-gray-500 mt-0.5">コンテナをプロジェクト単位で管理します</p>
         </div>
+
+        {/* リソースクォータ */}
+        {quota && (
+          <div className="mb-6 bg-white border border-gray-200 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <svg className="w-4 h-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+              <span className="text-sm font-medium text-gray-700">リソースクォータ</span>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              {(['small', 'medium', 'large'] as const).map((size) => {
+                const used = quota.usage[size];
+                const max = quota.limits[size];
+                const pct = max > 0 ? Math.min((used / max) * 100, 100) : 0;
+                const isOver = used >= max;
+                return (
+                  <div key={size}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-medium text-gray-600 capitalize">{size}</span>
+                      <span className={`text-xs font-semibold ${isOver ? 'text-red-600' : 'text-gray-700'}`}>
+                        {used} / {max}
+                      </span>
+                    </div>
+                    <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${isOver ? 'bg-red-500' : pct >= 80 ? 'bg-yellow-500' : 'bg-blue-500'}`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {loading ? (
           <div className="flex items-center justify-center h-64">

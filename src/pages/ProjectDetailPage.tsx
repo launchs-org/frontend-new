@@ -10,7 +10,7 @@ import {
   deleteProject, listProjectEnvVars, upsertProjectEnvVars,
   deleteProjectEnvVars, listJobs, listSnapshots, restoreSnapshot,
 } from '../services/projects';
-import { listContainers, createContainerFromGitHub, createContainerFromTemplate, listBuildJobs, cancelBuildJob } from '../services/containers';
+import { listContainers, createContainerFromGitHub, createContainerFromImage, createContainerFromTemplate, listBuildJobs, cancelBuildJob } from '../services/containers';
 import { listVolumes, createVolume, deleteVolume } from '../services/volumes';
 import { listBranches, listDirectories, parseRepo } from '../services/github';
 import { ContainerCard } from '../components/containers/ContainerCard';
@@ -60,8 +60,9 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
   const [deleting, setDeleting] = useState(false);
 
   // コンテナ作成モーダル
-  const [createMode, setCreateMode] = useState<'github' | 'template' | null>(null);
+  const [createMode, setCreateMode] = useState<'github' | 'image' | 'template' | null>(null);
   const [githubForm, setGithubForm] = useState({ name: '', git_repo: '', git_branch: 'main', git_subdir: '' });
+  const [imageForm, setImageForm] = useState({ name: '', image: '', resource_size: 'small', replicas: '1' });
   const [templateForm, setTemplateForm] = useState({ name: '', template_name: '' });
   const [creating, setCreating] = useState(false);
 
@@ -226,6 +227,27 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
       setGithubForm({ name: '', git_repo: '', git_branch: 'main', git_subdir: '' });
       setBranches([]);
       setDirs([]);
+      toastSuccess(`コンテナ "${c.name}" を作成しました`);
+    } catch (e: unknown) {
+      toastError(e instanceof Error ? e.message : 'コンテナ作成に失敗しました');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleCreateFromImage = async () => {
+    if (!imageForm.name.trim() || !imageForm.image.trim()) return;
+    setCreating(true);
+    try {
+      const c = await createContainerFromImage(project.id, {
+        name: imageForm.name,
+        image: imageForm.image,
+        resource_size: imageForm.resource_size as 'small' | 'medium' | 'large',
+        replicas: parseInt(imageForm.replicas, 10) || 1,
+      });
+      setContainers((prev) => [...prev, c]);
+      setCreateMode(null);
+      setImageForm({ name: '', image: '', resource_size: 'small', replicas: '1' });
       toastSuccess(`コンテナ "${c.name}" を作成しました`);
     } catch (e: unknown) {
       toastError(e instanceof Error ? e.message : 'コンテナ作成に失敗しました');
@@ -451,6 +473,11 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
                       icon={<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>}
                     >
                       GitHub からデプロイ
+                    </Button>
+                    <Button variant="secondary" size="sm" onClick={() => setCreateMode('image')}
+                      icon={<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10" /></svg>}
+                    >
+                      イメージからデプロイ
                     </Button>
                     <Button variant="secondary" size="sm" onClick={openTemplateModal}
                       icon={<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5z" /></svg>}
@@ -739,6 +766,71 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
                 className={inputCls}
               />
             )}
+          </div>
+        </div>
+      </Modal>
+
+      {/* Dockerイメージからデプロイモーダル */}
+      <Modal
+        open={createMode === 'image'}
+        onClose={() => { setCreateMode(null); setImageForm({ name: '', image: '', resource_size: 'small', replicas: '1' }); }}
+        title="Dockerイメージからデプロイ"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => { setCreateMode(null); setImageForm({ name: '', image: '', resource_size: 'small', replicas: '1' }); }}>キャンセル</Button>
+            <Button variant="primary" onClick={handleCreateFromImage} loading={creating}
+              disabled={!imageForm.name.trim() || !imageForm.image.trim()}
+            >
+              デプロイ
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <label className={labelCls}>コンテナ名 <span className="text-red-500">*</span></label>
+            <input
+              type="text"
+              value={imageForm.name}
+              onChange={(e) => setImageForm((prev) => ({ ...prev, name: e.target.value }))}
+              placeholder="my-container"
+              className={inputCls}
+            />
+          </div>
+          <div>
+            <label className={labelCls}>Dockerイメージ <span className="text-red-500">*</span></label>
+            <input
+              type="text"
+              value={imageForm.image}
+              onChange={(e) => setImageForm((prev) => ({ ...prev, image: e.target.value }))}
+              placeholder="nginx:latest または registry.example.com/app:v1.0"
+              className={inputCls}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className={labelCls}>リソースサイズ</label>
+              <select
+                value={imageForm.resource_size}
+                onChange={(e) => setImageForm((prev) => ({ ...prev, resource_size: e.target.value }))}
+                className={inputCls}
+              >
+                <option value="small">Small (CPU: 100m-500m / Mem: 128Mi-256Mi)</option>
+                <option value="medium">Medium (CPU: 500m-1000m / Mem: 512Mi-1Gi)</option>
+                <option value="large">Large (CPU: 1000m-2000m / Mem: 1Gi-2Gi)</option>
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>レプリカ数</label>
+              <input
+                type="number"
+                min={0}
+                max={5}
+                value={imageForm.replicas}
+                onChange={(e) => setImageForm((prev) => ({ ...prev, replicas: e.target.value }))}
+                className={inputCls}
+              />
+            </div>
           </div>
         </div>
       </Modal>
