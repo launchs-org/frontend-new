@@ -80,6 +80,8 @@ export interface ContainerSummary {
   active_deploy_workflow_id: string | null;
   active_scale_workflow_id: string | null;
   is_template: boolean;
+  is_image_deploy: boolean;
+  image_ref: string | null;
   pods: PodStatus[];
   created_at: string;
   updated_at: string;
@@ -101,6 +103,30 @@ export interface CreateContainerFromGitHubRequest {
   git_branch: string;
   git_subdir?: string;
   resource_size?: ResourceSize;
+}
+
+export interface CreateContainerFromImageRequest {
+  name: string;
+  image: string;
+  resource_size?: ResourceSize;
+  replicas?: number;
+  env_vars?: { key: string; value: string }[];
+  ports?: { port: number; protocol: string }[];
+}
+
+// ============================================================
+// Quota
+// ============================================================
+
+export interface QuotaUsage {
+  small: number;
+  medium: number;
+  large: number;
+}
+
+export interface QuotaInfo {
+  usage: QuotaUsage;
+  limits: QuotaUsage;
 }
 
 export interface CreateContainerFromTemplateRequest {

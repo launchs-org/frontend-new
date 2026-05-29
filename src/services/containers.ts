@@ -3,6 +3,7 @@ import type {
   ContainerSummary,
   ContainerDetail,
   CreateContainerFromGitHubRequest,
+  CreateContainerFromImageRequest,
   CreateContainerFromTemplateRequest,
   ScaleContainerRequest,
   EnvVar,
@@ -32,6 +33,13 @@ export async function createContainerFromGitHub(
   req: CreateContainerFromGitHubRequest
 ): Promise<ContainerSummary> {
   return post<ContainerSummary>(`/projects/${projectId}/containers/deploy`, req);
+}
+
+export async function createContainerFromImage(
+  projectId: string,
+  req: CreateContainerFromImageRequest
+): Promise<ContainerSummary> {
+  return post<ContainerSummary>(`/projects/${projectId}/containers/deploy-image`, req);
 }
 
 export async function createContainerFromTemplate(
