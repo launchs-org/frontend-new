@@ -2,7 +2,7 @@
 // Core Types derived from OpenAPI specification
 // ============================================================
 
-export type ProjectStatus = 'pending' | 'active' | 'terminating' | 'failed';
+export type ProjectStatus = 'pending' | 'active' | 'terminating' | 'deleting' | 'failed';
 
 export type ContainerStatus =
   | 'pending'
@@ -12,7 +12,8 @@ export type ContainerStatus =
   | 'running'
   | 'scaling'
   | 'failed'
-  | 'stopped';
+  | 'stopped'
+  | 'deleting';
 
 export type ResourceSize = 'small' | 'medium' | 'large';
 

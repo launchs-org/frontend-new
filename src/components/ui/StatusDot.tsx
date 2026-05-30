@@ -21,6 +21,8 @@ const variantMap: Record<string, string> = {
   stopped:   'bg-gray-400',
   unknown:   'bg-gray-400',
   Unknown:   'bg-gray-400',
+
+  deleting:  'bg-red-500 animate-pulse',
 };
 
 interface StatusDotProps {

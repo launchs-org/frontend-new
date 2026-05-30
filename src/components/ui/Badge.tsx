@@ -25,6 +25,8 @@ const variantStyles: Record<string, string> = {
   unknown:   'bg-gray-100 text-gray-600 ring-1 ring-gray-200',
   Unknown:   'bg-gray-100 text-gray-600 ring-1 ring-gray-200',
 
+  deleting:  'bg-red-100 text-red-700 ring-1 ring-red-200',
+
   service:   'bg-blue-100 text-blue-800 ring-1 ring-blue-200',
   ingress:   'bg-purple-100 text-purple-800 ring-1 ring-purple-200',
 
@@ -50,6 +52,7 @@ const labelMap: Record<string, string> = {
   stopped:   '停止',
   unknown:   '不明',
   Unknown:   '不明',
+  deleting:  '削除中',
   service:   'Service',
   ingress:   'Ingress',
 };
