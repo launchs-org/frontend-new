@@ -123,6 +123,7 @@ export interface QuotaUsage {
   small: number;
   medium: number;
   large: number;
+  storage_mb: number;
 }
 
 export interface QuotaInfo {

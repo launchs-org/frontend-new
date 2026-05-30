@@ -50,6 +50,11 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onSelectProject }) =
   const [quota, setQuota] = useState<QuotaInfo | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const formatMB = (mb: number): string => {
+    if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
+    return `${mb} MB`;
+  };
+
   const fetchProjects = async (initial = false) => {
     try {
       const data = await listProjects();
@@ -59,11 +64,11 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onSelectProject }) =
     } finally {
       if (initial) setLoading(false);
     }
+    getMyQuota().then(setQuota).catch(() => {});
   };
 
   useEffect(() => {
     fetchProjects(true);
-    getMyQuota().then(setQuota).catch(() => {});
     timerRef.current = setInterval(() => fetchProjects(), 5000);
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, []);
@@ -138,6 +143,30 @@ export const ProjectsPage: React.FC<ProjectsPageProps> = ({ onSelectProject }) =
                   </div>
                 );
               })}
+            </div>
+            <div className="mt-4">
+              {(() => {
+                const usedMB = quota.usage.storage_mb;
+                const maxMB = quota.limits.storage_mb;
+                const pct = maxMB > 0 ? Math.min((usedMB / maxMB) * 100, 100) : 0;
+                const isOver = usedMB >= maxMB;
+                return (
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-medium text-gray-600">ストレージ</span>
+                      <span className={`text-xs font-semibold ${isOver ? 'text-red-600' : 'text-gray-700'}`}>
+                        {formatMB(usedMB)} / {formatMB(maxMB)}
+                      </span>
+                    </div>
+                    <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${isOver ? 'bg-red-500' : pct >= 80 ? 'bg-yellow-500' : 'bg-blue-500'}`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}
