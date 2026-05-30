@@ -1009,21 +1009,6 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
 
             {/* イベントログ */}
             {tab === 'events' && (() => {
-              // デプロイ操作の中間状態は除外し、Pod 障害・復旧イベントのみ表示
-              const DEPLOY_STATUSES = new Set(['deploying', 'building', 'applying', 'scaling', 'deleting']);
-              const isHealthy = (h: ContainerStatusHistory) =>
-                h.status === 'running' && h.ready_replicas === h.replicas && h.failed_replicas === 0;
-
-              const filtered = statusHistories.filter((h, idx) => {
-                if (DEPLOY_STATUSES.has(h.status)) return false;
-                // running 全正常で直前も running 全正常なら省略（正常運転中のノイズ）
-                if (isHealthy(h)) {
-                  const prev = statusHistories[idx + 1]; // DESC 順なので次が時系列で前
-                  if (prev && isHealthy(prev)) return false;
-                }
-                return true;
-              });
-
               type EventMeta = { label: string; dotColor: string; badgeCls: string; rowCls: string };
               const getEventMeta = (h: ContainerStatusHistory): EventMeta => {
                 if (h.status === 'failed') {
@@ -1033,35 +1018,49 @@ export const ContainerDetailPage: React.FC<ContainerDetailPageProps> = ({
                   return { label: 'Pod 再起動待ち', dotColor: 'bg-yellow-400', badgeCls: 'bg-yellow-100 text-yellow-700', rowCls: 'bg-yellow-50/30' };
                 }
                 if (h.status === 'stopped') {
-                  return { label: '予期しない停止', dotColor: 'bg-gray-400', badgeCls: 'bg-gray-100 text-gray-600', rowCls: '' };
+                  return { label: '停止', dotColor: 'bg-gray-400', badgeCls: 'bg-gray-100 text-gray-600', rowCls: '' };
+                }
+                if (h.status === 'building') {
+                  return { label: 'ビルド中', dotColor: 'bg-purple-400', badgeCls: 'bg-purple-100 text-purple-700', rowCls: '' };
+                }
+                if (h.status === 'deploying') {
+                  return { label: 'デプロイ中', dotColor: 'bg-blue-400', badgeCls: 'bg-blue-100 text-blue-700', rowCls: '' };
+                }
+                if (h.status === 'applying') {
+                  return { label: '反映中', dotColor: 'bg-indigo-400', badgeCls: 'bg-indigo-100 text-indigo-700', rowCls: '' };
+                }
+                if (h.status === 'scaling') {
+                  return { label: 'スケール中', dotColor: 'bg-purple-400', badgeCls: 'bg-purple-100 text-purple-700', rowCls: '' };
+                }
+                if (h.status === 'deleting') {
+                  return { label: '削除中', dotColor: 'bg-red-400', badgeCls: 'bg-red-100 text-red-600', rowCls: '' };
                 }
                 if (h.status === 'running' && (h.ready_replicas < h.replicas || h.failed_replicas > 0)) {
                   return { label: '一部 Pod 障害', dotColor: 'bg-orange-400', badgeCls: 'bg-orange-100 text-orange-700', rowCls: 'bg-orange-50/30' };
                 }
-                // running 全正常 → 障害からの復旧
-                return { label: '復旧', dotColor: 'bg-green-500', badgeCls: 'bg-green-100 text-green-700', rowCls: 'bg-green-50/20' };
+                // running 全正常
+                return { label: '稼働中', dotColor: 'bg-green-500', badgeCls: 'bg-green-100 text-green-700', rowCls: '' };
               };
 
               return (
                 <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
                   <div className="px-5 py-4 border-b border-gray-100">
-                    <h2 className="text-sm font-semibold text-gray-800">Pod イベント履歴</h2>
-                    <p className="text-xs text-gray-500 mt-1">Pod の障害・復旧イベントを記録しています（過去1週間）</p>
+                    <h2 className="text-sm font-semibold text-gray-800">ステータス変化履歴</h2>
+                    <p className="text-xs text-gray-500 mt-1">コンテナのステータス変化をすべて記録しています（過去1週間）</p>
                   </div>
-                  {filtered.length === 0 ? (
+                  {statusHistories.length === 0 ? (
                     <div className="px-5 py-12 text-center">
-                      <p className="text-sm text-gray-400">障害・復旧イベントはありません</p>
-                      <p className="text-xs text-gray-300 mt-1">デプロイ操作中のステータス変化は表示されません</p>
+                      <p className="text-sm text-gray-400">イベントはありません</p>
                     </div>
                   ) : (
                     <div className="divide-y divide-gray-50">
-                      {filtered.map((h, idx) => {
+                      {statusHistories.map((h, idx) => {
                         const meta = getEventMeta(h);
                         return (
                           <div key={h.id} className={`flex items-start gap-4 px-5 py-3.5 ${meta.rowCls}`}>
                             <div className="flex flex-col items-center pt-1.5 gap-1">
                               <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${meta.dotColor}`} />
-                              {idx < filtered.length - 1 && (
+                              {idx < statusHistories.length - 1 && (
                                 <div className="w-px flex-1 min-h-[20px] bg-gray-200" />
                               )}
                             </div>
