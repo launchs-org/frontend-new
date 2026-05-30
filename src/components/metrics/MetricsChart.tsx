@@ -1,20 +1,53 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, type TooltipProps,
+} from 'recharts';
 import type { MetricPoint, Metrics } from '../../lib/types';
 import { getMetrics } from '../../services/logs';
 import { formatPercent, formatBytes } from '../../lib/utils';
 
 const AUTO_REFRESH_INTERVAL = 15;
 
+// ────────────────────────────────────────────────────────────
+// カスタムツールチップ
+// ────────────────────────────────────────────────────────────
+interface ChartTooltipProps extends TooltipProps<number, string> {
+  unit: 'percent' | 'bytes';
+  color: string;
+}
+
+function ChartTooltip({ active, payload, unit, color }: ChartTooltipProps) {
+  if (!active || !payload?.length) return null;
+  const point = payload[0].payload as MetricPoint;
+  const value = payload[0].value as number;
+  const formatValue = (v: number) => unit === 'percent' ? formatPercent(v) : formatBytes(v);
+  const time = new Date(point.timestamp).toLocaleTimeString('ja-JP', {
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  });
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg px-3 py-2 shadow-md text-xs">
+      <p className="text-gray-400 mb-1">{time}</p>
+      <p className="font-semibold font-mono text-sm" style={{ color }}>{formatValue(value)}</p>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// 単一グラフ
+// ────────────────────────────────────────────────────────────
 interface LineChartProps {
   data: MetricPoint[];
   color: string;
-  fillColor: string;
   label: string;
   unit: 'percent' | 'bytes';
   height?: number;
 }
 
-function LineChart({ data, color, fillColor, label, unit, height = 200 }: LineChartProps) {
+function LineChart({ data, color, label, unit, height = 200 }: LineChartProps) {
+  const formatValue = (v: number) => unit === 'percent' ? formatPercent(v) : formatBytes(v);
+  const formatTick = (v: number) => unit === 'percent' ? `${Math.round(v)}%` : formatBytes(v);
+
   if (data.length === 0) {
     return (
       <div style={{ height }} className="flex items-center justify-center bg-gray-50 rounded-lg">
@@ -24,46 +57,19 @@ function LineChart({ data, color, fillColor, label, unit, height = 200 }: LineCh
   }
 
   const values = data.map((d) => d.value);
-  const min = 0;
-  const max = Math.max(...values, unit === 'percent' ? 100 : 1) * 1.1;
-  const width = 1000;
-  const padLeft = 52;
-  const padRight = 16;
-  const padTop = 12;
-  const padBottom = 28;
-  const chartW = width - padLeft - padRight;
-  const chartH = height - padTop - padBottom;
-
-  const toX = (i: number) => padLeft + (i / (data.length - 1 || 1)) * chartW;
-  const toY = (v: number) => padTop + chartH - ((v - min) / (max - min || 1)) * chartH;
-
-  const points = data.map((d, i) => `${toX(i)},${toY(d.value)}`).join(' ');
-  const fillPoints = [
-    `${padLeft},${padTop + chartH}`,
-    ...data.map((d, i) => `${toX(i)},${toY(d.value)}`),
-    `${toX(data.length - 1)},${padTop + chartH}`,
-  ].join(' ');
-
   const latest = values[values.length - 1] ?? 0;
   const avg = values.reduce((a, b) => a + b, 0) / values.length;
-  const formatValue = (v: number) => unit === 'percent' ? formatPercent(v) : formatBytes(v);
+  const domainMax = Math.max(...values, unit === 'percent' ? 100 : 1) * 1.1;
 
-  const yLabels = [0, 0.25, 0.5, 0.75, 1].map((t) => ({
-    value: min + t * (max - min),
-    y: padTop + chartH - t * chartH,
-  }));
-
-  const xTickCount = Math.min(data.length, 6);
-  const xLabels = data.length >= 2
-    ? Array.from({ length: xTickCount }, (_, i) => {
-        const idx = Math.round(i / (xTickCount - 1) * (data.length - 1));
-        return {
-          label: new Date(data[idx].timestamp).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false }),
-          x: toX(idx),
-          anchor: i === 0 ? 'start' : i === xTickCount - 1 ? 'end' : 'middle',
-        };
-      })
-    : [];
+  // XAxis 用ラベル（データが多くても最大6本）
+  const tickCount = Math.min(data.length, 6);
+  const tickIndices = Array.from({ length: tickCount }, (_, i) =>
+    Math.round((i / (tickCount - 1 || 1)) * (data.length - 1))
+  );
+  const tickSet = new Set(tickIndices);
+  const xTicks = data
+    .map((d, i) => (tickSet.has(i) ? d.timestamp : null))
+    .filter(Boolean) as string[];
 
   return (
     <div>
@@ -78,30 +84,55 @@ function LineChart({ data, color, fillColor, label, unit, height = 200 }: LineCh
           <span>最大: <span className="font-semibold font-mono text-sm text-gray-700">{formatValue(Math.max(...values))}</span></span>
         </div>
       </div>
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full overflow-visible" style={{ height }}>
-        {yLabels.map(({ y }, i) => (
-          <line key={i} x1={padLeft} y1={y} x2={padLeft + chartW} y2={y} stroke="#f1f3f4" strokeWidth={1} />
-        ))}
-        {yLabels.map(({ value, y }, i) => (
-          <text key={i} x={padLeft - 8} y={y + 4} textAnchor="end" fontSize={10} fill="#9aa0a6">
-            {unit === 'percent' ? `${Math.round(value)}%` : formatBytes(value)}
-          </text>
-        ))}
-        {xLabels.map(({ label: xl, x, anchor }, i) => (
-          <text key={i} x={x} y={padTop + chartH + 18} textAnchor={anchor as 'start' | 'end' | 'middle'} fontSize={10} fill="#9aa0a6">
-            {xl}
-          </text>
-        ))}
-        <polygon points={fillPoints} fill={fillColor} fillOpacity={0.12} />
-        <polyline points={points} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-        {data.length > 0 && (
-          <circle cx={toX(data.length - 1)} cy={toY(latest)} r={4} fill={color} stroke="white" strokeWidth={2} />
-        )}
-      </svg>
+      <ResponsiveContainer width="100%" height={height}>
+        <AreaChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+          <defs>
+            <linearGradient id={`fill-${color.replace('#', '')}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor={color} stopOpacity={0.15} />
+              <stop offset="95%" stopColor={color} stopOpacity={0.01} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="#f1f3f4" vertical={false} />
+          <XAxis
+            dataKey="timestamp"
+            ticks={xTicks}
+            tickFormatter={(v) =>
+              new Date(v).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false })
+            }
+            tick={{ fontSize: 10, fill: '#9aa0a6' }}
+            axisLine={false}
+            tickLine={false}
+          />
+          <YAxis
+            domain={[0, domainMax]}
+            tickFormatter={formatTick}
+            tick={{ fontSize: 10, fill: '#9aa0a6' }}
+            axisLine={false}
+            tickLine={false}
+            width={52}
+          />
+          <Tooltip
+            content={<ChartTooltip unit={unit} color={color} />}
+            cursor={{ stroke: '#9aa0a6', strokeWidth: 1, strokeDasharray: '4 3' }}
+          />
+          <Area
+            type="monotone"
+            dataKey="value"
+            stroke={color}
+            strokeWidth={2}
+            fill={`url(#fill-${color.replace('#', '')})`}
+            dot={false}
+            activeDot={{ r: 5, fill: color, stroke: 'white', strokeWidth: 2 }}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
     </div>
   );
 }
 
+// ────────────────────────────────────────────────────────────
+// メトリクス全体コンポーネント
+// ────────────────────────────────────────────────────────────
 interface MetricsChartProps {
   projectId: string;
   containerId: string;
@@ -129,17 +160,14 @@ export const MetricsChart: React.FC<MetricsChartProps> = ({ projectId, container
     }
   }, [projectId, containerId, duration]);
 
-  // 初回・duration変更時にフェッチ
   useEffect(() => {
     fetchMetrics(true);
     countdownRef.current = AUTO_REFRESH_INTERVAL;
     setCountdown(AUTO_REFRESH_INTERVAL);
   }, [fetchMetrics]);
 
-  // 自動更新カウントダウン
   useEffect(() => {
     if (!autoRefresh) return;
-
     const tick = setInterval(() => {
       countdownRef.current -= 1;
       setCountdown(countdownRef.current);
@@ -149,7 +177,6 @@ export const MetricsChart: React.FC<MetricsChartProps> = ({ projectId, container
         fetchMetrics();
       }
     }, 1000);
-
     return () => clearInterval(tick);
   }, [autoRefresh, fetchMetrics]);
 
@@ -178,12 +205,9 @@ export const MetricsChart: React.FC<MetricsChartProps> = ({ projectId, container
           {['15m', '1h', '6h', '24h', '7d'].map((d) => (
             <button
               key={d}
-              onClick={() => { setDuration(d); }}
+              onClick={() => setDuration(d)}
               className={`px-3 py-1 rounded-full text-xs font-medium transition-all
-                ${duration === d
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
+                ${duration === d ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
             >
               {d}
             </button>
@@ -191,7 +215,6 @@ export const MetricsChart: React.FC<MetricsChartProps> = ({ projectId, container
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          {/* 自動更新トグル */}
           <button
             onClick={handleToggleAutoRefresh}
             className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all border
@@ -203,8 +226,6 @@ export const MetricsChart: React.FC<MetricsChartProps> = ({ projectId, container
             <span className={`w-1.5 h-1.5 rounded-full ${autoRefresh ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} />
             {autoRefresh ? `自動更新 ${countdown}s` : '自動更新 OFF'}
           </button>
-
-          {/* 手動更新 */}
           <button
             onClick={handleManualRefresh}
             className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-all"
@@ -228,10 +249,10 @@ export const MetricsChart: React.FC<MetricsChartProps> = ({ projectId, container
       {!loading && metrics && (
         <div className="space-y-5">
           <div className="bg-white border border-gray-200 rounded-xl p-6">
-            <LineChart data={metrics.cpu} color="#1a73e8" fillColor="#1a73e8" label="CPU 使用率" unit="percent" height={200} />
+            <LineChart data={metrics.cpu} color="#1a73e8" label="CPU 使用率" unit="percent" height={200} />
           </div>
           <div className="bg-white border border-gray-200 rounded-xl p-6">
-            <LineChart data={metrics.memory} color="#34a853" fillColor="#34a853" label="メモリ使用量" unit="bytes" height={200} />
+            <LineChart data={metrics.memory} color="#34a853" label="メモリ使用量" unit="bytes" height={200} />
           </div>
         </div>
       )}
