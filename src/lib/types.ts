@@ -371,6 +371,54 @@ export interface Connection {
 }
 
 // ============================================================
+// WorkflowRun
+// ============================================================
+
+export type WorkflowRunStatus = 'running' | 'succeeded' | 'failed' | 'canceled';
+
+export type WorkflowRunType =
+  | 'CreateProject'
+  | 'DeleteProject'
+  | 'DeployProject'
+  | 'Deploy'
+  | 'Redeploy'
+  | 'DeleteContainer'
+  | 'Scale'
+  | 'BuildDeploy'
+  | 'CancelBuild'
+  | 'CreateVolume'
+  | 'DeleteVolume'
+  | 'MountVolume'
+  | 'UnmountVolume'
+  | 'CreateService'
+  | 'DeleteService'
+  | 'CreateIngress'
+  | 'DeleteIngress'
+  | 'RestoreSnapshot'
+  | 'DeployTemplate';
+
+export interface WorkflowRun {
+  id: string;
+  project_id: string;
+  workflow_id: string;
+  workflow_type: WorkflowRunType;
+  status: WorkflowRunStatus;
+  container_id?: string;
+  label?: string;
+  log?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowRunEvent {
+  id: string;
+  workflow_run_id: string;
+  status: WorkflowRunStatus;
+  message?: string;
+  created_at: string;
+}
+
+// ============================================================
 // API Response Wrapper
 // ============================================================
 

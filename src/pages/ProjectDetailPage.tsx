@@ -3,6 +3,7 @@ import type {
   Project, ContainerSummary, Volume, EnvVar, Job, Snapshot, BuildJob,
   TemplateSummary, TemplateDetail,
 } from '../lib/types';
+import { WorkflowRunList } from '../components/workflow/WorkflowRunList';
 import { listTemplates, getTemplate } from '../services/templates';
 import { getAppConfig } from '../services/config';
 import type { AppConfig } from '../services/config';
@@ -26,7 +27,7 @@ import { TopBar } from '../components/layout/TopBar';
 import { toastError, toastSuccess } from '../components/ui/Toast';
 import { formatDate, formatBytes, formatRelativeTime } from '../lib/utils';
 
-type Tab = 'containers' | 'volumes' | 'envvars' | 'jobs' | 'snapshots';
+type Tab = 'containers' | 'volumes' | 'envvars' | 'jobs' | 'snapshots' | 'workflows';
 
 interface ProjectDetailPageProps {
   project: Project;
@@ -42,7 +43,7 @@ const labelCls = "block text-sm font-medium text-gray-700 mb-1.5";
 export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
   project, initialTab, onBack, onSelectContainer, onTabChange,
 }) => {
-  const validTabs: Tab[] = ['containers', 'volumes', 'envvars', 'jobs', 'snapshots'];
+  const validTabs: Tab[] = ['containers', 'volumes', 'envvars', 'jobs', 'snapshots', 'workflows'];
   const resolvedInitialTab = (validTabs.includes(initialTab as Tab) ? initialTab : 'containers') as Tab;
   const [tab, setTabState] = useState<Tab>(resolvedInitialTab);
 
@@ -411,6 +412,7 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
     { key: 'envvars',    label: '環境変数', count: envVars.length },
     { key: 'jobs',       label: 'ジョブ', count: buildJobs.length },
     { key: 'snapshots',  label: 'スナップショット', count: snapshots.length },
+    { key: 'workflows',  label: 'ワークフロー' },
   ];
 
   return (
@@ -667,6 +669,17 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
                     keyExtractor={(s) => s.id}
                   />
                 )}
+              </div>
+            )}
+
+            {/* ワークフロー進捗 */}
+            {tab === 'workflows' && (
+              <div>
+                <div className="mb-4">
+                  <h2 className="text-base font-semibold text-gray-800">ワークフロー履歴</h2>
+                  <p className="text-xs text-gray-500">デプロイ・ビルド・スケールなど全操作の実行状況（最新50件）</p>
+                </div>
+                <WorkflowRunList projectId={project.id} />
               </div>
             )}
           </>
