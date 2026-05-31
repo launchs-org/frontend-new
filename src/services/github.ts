@@ -4,6 +4,16 @@ export interface GitHubBranch {
   name: string;
 }
 
+export interface GitHubCommit {
+  sha: string;
+  commit: {
+    message: string;
+    author: {
+      date: string;
+    };
+  };
+}
+
 export interface GitHubTreeItem {
   path: string;
   type: 'blob' | 'tree';
@@ -23,6 +33,12 @@ export function parseRepo(input: string): string | null {
 export async function listBranches(repo: string): Promise<GitHubBranch[]> {
   const res = await fetch(`${GITHUB_API}/repos/${repo}/branches?per_page=100`);
   if (!res.ok) throw new Error('ブランチの取得に失敗しました');
+  return res.json();
+}
+
+export async function listCommits(repo: string, branch: string): Promise<GitHubCommit[]> {
+  const res = await fetch(`${GITHUB_API}/repos/${repo}/commits?sha=${encodeURIComponent(branch)}&per_page=30`);
+  if (!res.ok) throw new Error('コミット履歴の取得に失敗しました');
   return res.json();
 }
 

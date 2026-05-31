@@ -25,7 +25,7 @@ export type VolumeStatus = 'pending' | 'bound' | 'lost';
 
 export type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
 
-export type BuildJobStatus = 'pending' | 'running' | 'complete' | 'failed';
+export type BuildJobStatus = 'pending' | 'running' | 'canceling' | 'complete' | 'failed';
 
 export type PodStatusValue =
   | 'Running'
@@ -102,6 +102,7 @@ export interface CreateContainerFromGitHubRequest {
   name: string;
   git_repo: string;
   git_branch: string;
+  git_commit?: string;
   git_subdir?: string;
   resource_size?: ResourceSize;
 }

@@ -12,7 +12,8 @@ import {
 } from '../services/projects';
 import { listContainers, createContainerFromGitHub, createContainerFromImage, createContainerFromTemplate, listBuildJobs, cancelBuildJob } from '../services/containers';
 import { listVolumes, createVolume, deleteVolume } from '../services/volumes';
-import { listBranches, listDirectories, parseRepo } from '../services/github';
+import { listBranches, listDirectories, listCommits, parseRepo } from '../services/github';
+import type { GitHubCommit } from '../services/github';
 import { ContainerCard } from '../components/containers/ContainerCard';
 import { EnvVarEditor } from '../components/envvars/EnvVarEditor';
 import { Table } from '../components/ui/Table';
@@ -61,7 +62,7 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
 
   // コンテナ作成モーダル
   const [createMode, setCreateMode] = useState<'github' | 'image' | 'template' | null>(null);
-  const [githubForm, setGithubForm] = useState({ name: '', git_repo: '', git_branch: 'main', git_subdir: '' });
+  const [githubForm, setGithubForm] = useState({ name: '', git_repo: '', git_branch: 'main', git_commit: '', git_subdir: '' });
   const [imageForm, setImageForm] = useState({ name: '', image: '', resource_size: 'small', replicas: '1' });
   const [templateForm, setTemplateForm] = useState({ name: '', template_name: '' });
   const [creating, setCreating] = useState(false);
@@ -76,11 +77,13 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
   const [volumeSize, setVolumeSize] = useState<number>(0);
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
 
-  // GitHub API ブランチ・ディレクトリ
+  // GitHub API ブランチ・ディレクトリ・コミット
   const [branches, setBranches] = useState<string[]>([]);
   const [dirs, setDirs] = useState<string[]>([]);
+  const [commits, setCommits] = useState<GitHubCommit[]>([]);
   const [loadingBranches, setLoadingBranches] = useState(false);
   const [loadingDirs, setLoadingDirs] = useState(false);
+  const [loadingCommits, setLoadingCommits] = useState(false);
 
   // ボリューム作成モーダル
   const [volumeCreateOpen, setVolumeCreateOpen] = useState(false);
@@ -190,7 +193,7 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
         : result.find((b) => b.name === 'master') ? 'master'
         : result[0]?.name ?? 'main';
       setGithubForm((prev) => ({ ...prev, git_branch: defaultBranch }));
-      await fetchDirs(repo, defaultBranch);
+      await Promise.all([fetchDirs(repo, defaultBranch), fetchCommits(repo, defaultBranch)]);
     } catch {
       // リポジトリが非公開などで取得できない場合は無視
     } finally {
@@ -212,6 +215,22 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
     }
   };
 
+  const fetchCommits = async (repo: string, branch: string) => {
+    const normalized = parseRepo(repo) ?? repo;
+    if (!normalized || !branch) return;
+    setLoadingCommits(true);
+    setCommits([]);
+    setGithubForm((prev) => ({ ...prev, git_commit: '' }));
+    try {
+      const result = await listCommits(normalized, branch);
+      setCommits(result);
+    } catch {
+      // 取得失敗は無視（手動入力で対応）
+    } finally {
+      setLoadingCommits(false);
+    }
+  };
+
   const handleCreateGitHub = async () => {
     if (!githubForm.name.trim() || !githubForm.git_repo.trim()) return;
     setCreating(true);
@@ -220,13 +239,15 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
         name: githubForm.name,
         git_repo: githubForm.git_repo,
         git_branch: githubForm.git_branch || 'main',
+        git_commit: githubForm.git_commit || undefined,
         git_subdir: githubForm.git_subdir || undefined,
       });
       setContainers((prev) => [...prev, c]);
       setCreateMode(null);
-      setGithubForm({ name: '', git_repo: '', git_branch: 'main', git_subdir: '' });
+      setGithubForm({ name: '', git_repo: '', git_branch: 'main', git_commit: '', git_subdir: '' });
       setBranches([]);
       setDirs([]);
+      setCommits([]);
       toastSuccess(`コンテナ "${c.name}" を作成しました`);
     } catch (e: unknown) {
       toastError(e instanceof Error ? e.message : 'コンテナ作成に失敗しました');
@@ -388,7 +409,7 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
     { key: 'containers', label: 'コンテナ', count: containers.length },
     { key: 'volumes',    label: 'ボリューム', count: volumes.length },
     { key: 'envvars',    label: '環境変数', count: envVars.length },
-    { key: 'jobs',       label: 'ジョブ', count: jobs.length + buildJobs.length },
+    { key: 'jobs',       label: 'ジョブ', count: buildJobs.length },
     { key: 'snapshots',  label: 'スナップショット', count: snapshots.length },
   ];
 
@@ -566,78 +587,55 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
 
             {/* ジョブ */}
             {tab === 'jobs' && (
-              <div className="space-y-6">
-                {/* デプロイジョブ */}
-                <div>
-                  <div className="mb-3">
-                    <h2 className="text-base font-semibold text-gray-800">デプロイジョブ</h2>
-                    <p className="text-xs text-gray-500">デプロイ・スケールなどの実行ジョブ ({jobs.length} 件)</p>
-                  </div>
-                  {jobs.length === 0 ? (
-                    <EmptyState title="ジョブはありません" description="デプロイジョブが実行されるとここに表示されます。" />
-                  ) : (
-                    <Table
-                      columns={[
-                        { key: 'type', header: 'タイプ', render: (j) => <Badge status={j.type} /> },
-                        { key: 'container', header: 'コンテナ', render: (j) => <span className="text-gray-600">{j.container_name ?? '—'}</span> },
-                        { key: 'status', header: 'ステータス', render: (j) => <Badge status={j.status} /> },
-                        { key: 'started', header: '開始', render: (j) => <span className="text-gray-500 text-xs">{formatDate(j.started_at)}</span> },
-                        { key: 'finished', header: '完了', render: (j) => <span className="text-gray-500 text-xs">{formatDate(j.finished_at)}</span> },
-                      ]}
-                      data={jobs}
-                      keyExtractor={(j) => j.id}
-                      emptyMessage="ジョブなし"
-                    />
-                  )}
+              <div>
+                <div className="mb-3">
+                  <h2 className="text-base font-semibold text-gray-800">ビルドジョブ</h2>
+                  <p className="text-xs text-gray-500">プロジェクト内全コンテナのビルド履歴 ({buildJobs.length} 件)</p>
                 </div>
-
-                {/* ビルドジョブ */}
-                <div>
-                  <div className="mb-3">
-                    <h2 className="text-base font-semibold text-gray-800">ビルドジョブ</h2>
-                    <p className="text-xs text-gray-500">プロジェクト内全コンテナのビルド履歴 ({buildJobs.length} 件)</p>
-                  </div>
-                  {buildJobs.length === 0 ? (
-                    <EmptyState title="ビルドジョブはありません" description="ビルドが実行されるとここに表示されます。" />
-                  ) : (
-                    <Table
-                      columns={[
-                        { key: 'status', header: 'ステータス', render: (j) => <Badge status={j.status} /> },
-                        { key: 'branch', header: 'ブランチ', render: (j) => <span className="font-mono text-xs text-gray-700">{j.git_branch || '—'}</span> },
-                        { key: 'commit', header: 'コミット', render: (j) => j.git_commit ? <span className="font-mono text-xs text-gray-500">{j.git_commit.slice(0, 7)}</span> : <span className="text-gray-300">—</span> },
-                        { key: 'started', header: '開始', render: (j) => <span className="text-gray-500 text-xs">{formatDate(j.started_at)}</span> },
-                        { key: 'finished', header: '完了', render: (j) => <span className="text-gray-500 text-xs">{formatDate(j.finished_at)}</span> },
-                        {
-                          key: 'actions', header: '',
-                          render: (j) => (j.status === 'pending' || j.status === 'running') ? (
-                            <Button variant="ghost" size="sm" onClick={async () => {
-                              try {
-                                await cancelBuildJob(project.id, j.id);
-                                toastSuccess('ビルドをキャンセルしました');
-                                // ビルドジョブ一覧を再取得
-                                const currentContainers = await listContainers(project.id);
-                                const bjResults = await Promise.allSettled(currentContainers.map((c) => listBuildJobs(project.id, c.id)));
-                                const allBj: BuildJob[] = [];
-                                bjResults.forEach((r) => { if (r.status === 'fulfilled') allBj.push(...r.value); });
-                                allBj.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-                                setBuildJobs(allBj);
-                              } catch (e: unknown) {
-                                toastError(e instanceof Error ? e.message : 'キャンセルに失敗しました');
-                              }
-                            }}>
-                              <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                              </svg>
-                            </Button>
-                          ) : null,
-                        },
-                      ]}
-                      data={buildJobs}
-                      keyExtractor={(j) => j.id}
-                      emptyMessage="ビルドジョブなし"
-                    />
-                  )}
-                </div>
+                {buildJobs.length === 0 ? (
+                  <EmptyState title="ビルドジョブはありません" description="ビルドが実行されるとここに表示されます。" />
+                ) : (
+                  <Table
+                    columns={[
+                      { key: 'status', header: 'ステータス', render: (j) => <Badge status={j.status} /> },
+                      { key: 'branch', header: 'ブランチ', render: (j) => <span className="font-mono text-xs text-gray-700">{j.git_branch || '—'}</span> },
+                      {
+                        key: 'commit', header: 'コミット',
+                        render: (j) => j.git_commit
+                          ? <span className="font-mono text-xs text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">{j.git_commit.slice(0, 7)}</span>
+                          : <span className="text-gray-300">—</span>,
+                      },
+                      { key: 'started', header: '開始', render: (j) => <span className="text-gray-500 text-xs">{j.started_at ? formatDate(j.started_at) : '—'}</span> },
+                      { key: 'finished', header: '完了', render: (j) => <span className="text-gray-500 text-xs">{j.finished_at ? formatDate(j.finished_at) : '—'}</span> },
+                      {
+                        key: 'actions', header: '',
+                        render: (j) => (j.status === 'pending' || j.status === 'running') ? (
+                          <Button variant="ghost" size="sm" onClick={async () => {
+                            try {
+                              await cancelBuildJob(project.id, j.id);
+                              toastSuccess('ビルドをキャンセルしました');
+                              const currentContainers = await listContainers(project.id);
+                              const bjResults = await Promise.allSettled(currentContainers.map((c) => listBuildJobs(project.id, c.id)));
+                              const allBj: BuildJob[] = [];
+                              bjResults.forEach((r) => { if (r.status === 'fulfilled') allBj.push(...r.value); });
+                              allBj.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+                              setBuildJobs(allBj);
+                            } catch (e: unknown) {
+                              toastError(e instanceof Error ? e.message : 'キャンセルに失敗しました');
+                            }
+                          }}>
+                            <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </Button>
+                        ) : null,
+                      },
+                    ]}
+                    data={buildJobs}
+                    keyExtractor={(j) => j.id}
+                    emptyMessage="ビルドジョブなし"
+                  />
+                )}
               </div>
             )}
 
@@ -678,12 +676,12 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
       {/* GitHub デプロイモーダル */}
       <Modal
         open={createMode === 'github'}
-        onClose={() => { setCreateMode(null); setBranches([]); setDirs([]); }}
+        onClose={() => { setCreateMode(null); setBranches([]); setDirs([]); setCommits([]); }}
         title="GitHub からコンテナをデプロイ"
         size="md"
         footer={
           <>
-            <Button variant="secondary" onClick={() => { setCreateMode(null); setBranches([]); setDirs([]); }}>キャンセル</Button>
+            <Button variant="secondary" onClick={() => { setCreateMode(null); setBranches([]); setDirs([]); setCommits([]); }}>キャンセル</Button>
             <Button variant="primary" onClick={handleCreateGitHub} loading={creating}
               disabled={!githubForm.name.trim() || !githubForm.git_repo.trim()}
             >
@@ -723,8 +721,9 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
               <select
                 value={githubForm.git_branch}
                 onChange={(e) => {
-                  setGithubForm((prev) => ({ ...prev, git_branch: e.target.value, git_subdir: '' }));
+                  setGithubForm((prev) => ({ ...prev, git_branch: e.target.value, git_subdir: '', git_commit: '' }));
                   fetchDirs(githubForm.git_repo, e.target.value);
+                  fetchCommits(githubForm.git_repo, e.target.value);
                 }}
                 className={inputCls}
               >
@@ -763,6 +762,35 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
                 value={githubForm.git_subdir}
                 onChange={(e) => setGithubForm((prev) => ({ ...prev, git_subdir: e.target.value }))}
                 placeholder=". (ルート) または ./docs"
+                className={inputCls}
+              />
+            )}
+          </div>
+          <div>
+            <label className={labelCls}>
+              コミット
+              {loadingCommits && <span className="ml-2 text-xs text-gray-400">取得中...</span>}
+              <span className="ml-2 text-xs text-gray-400 font-normal">（省略時は最新コミット）</span>
+            </label>
+            {commits.length > 0 ? (
+              <select
+                value={githubForm.git_commit}
+                onChange={(e) => setGithubForm((prev) => ({ ...prev, git_commit: e.target.value }))}
+                className={inputCls}
+              >
+                <option value="">最新コミット (HEAD)</option>
+                {commits.map((c) => (
+                  <option key={c.sha} value={c.sha}>
+                    {c.sha.slice(0, 7)} — {c.commit.message.split('\n')[0].slice(0, 60)}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                value={githubForm.git_commit}
+                onChange={(e) => setGithubForm((prev) => ({ ...prev, git_commit: e.target.value }))}
+                placeholder="コミットSHA（省略可）"
                 className={inputCls}
               />
             )}
