@@ -91,6 +91,20 @@ export async function checkAuth(): Promise<boolean> {
   }
 }
 
+/** アクセストークンからユーザー名（ProvUid）を取得する */
+export function getCurrentUsername(): string | null {
+  const token = getAccessToken();
+  if (!token) return null;
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return null;
+    const decoded = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+    return decoded.provUid ?? decoded.userID ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** ログアウト：トークンをクリアして /auth/login へ */
 export async function logout(): Promise<void> {
   const refreshToken = getRefreshToken();

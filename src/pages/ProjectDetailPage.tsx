@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import type {
-  Project, ContainerSummary, Volume, EnvVar, Job, Snapshot, BuildJob,
+  Project, ContainerSummary, Volume, EnvVar, Job, BuildJob,
   TemplateSummary, TemplateDetail,
 } from '../lib/types';
 import { WorkflowRunList } from '../components/workflow/WorkflowRunList';
@@ -9,7 +9,7 @@ import { getAppConfig } from '../services/config';
 import type { AppConfig } from '../services/config';
 import {
   deleteProject, listProjectEnvVars, upsertProjectEnvVars,
-  deleteProjectEnvVars, listJobs, listSnapshots, restoreSnapshot,
+  deleteProjectEnvVars, listJobs,
 } from '../services/projects';
 import { listContainers, createContainerFromGitHub, createContainerFromImage, createContainerFromTemplate, listBuildJobs, cancelBuildJob } from '../services/containers';
 import { listVolumes, createVolume, deleteVolume } from '../services/volumes';
@@ -27,7 +27,7 @@ import { TopBar } from '../components/layout/TopBar';
 import { toastError, toastSuccess } from '../components/ui/Toast';
 import { formatDate, formatBytes, formatRelativeTime } from '../lib/utils';
 
-type Tab = 'containers' | 'volumes' | 'envvars' | 'jobs' | 'snapshots' | 'workflows';
+type Tab = 'containers' | 'volumes' | 'envvars' | 'jobs' | 'workflows';
 
 interface ProjectDetailPageProps {
   project: Project;
@@ -43,7 +43,7 @@ const labelCls = "block text-sm font-medium text-gray-700 mb-1.5";
 export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
   project, initialTab, onBack, onSelectContainer, onTabChange,
 }) => {
-  const validTabs: Tab[] = ['containers', 'volumes', 'envvars', 'jobs', 'snapshots', 'workflows'];
+  const validTabs: Tab[] = ['containers', 'volumes', 'envvars', 'jobs', 'workflows'];
   const resolvedInitialTab = (validTabs.includes(initialTab as Tab) ? initialTab : 'containers') as Tab;
   const [tab, setTabState] = useState<Tab>(resolvedInitialTab);
 
@@ -56,7 +56,6 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
   const [envVars, setEnvVars] = useState<EnvVar[]>([]);
   const [_jobs, setJobs] = useState<Job[]>([]);
   const [buildJobs, setBuildJobs] = useState<BuildJob[]>([]);
-  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [loading, setLoading] = useState(true);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -94,12 +93,11 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [c, v, e, j, s] = await Promise.allSettled([
+      const [c, v, e, j] = await Promise.allSettled([
         listContainers(project.id),
         listVolumes(project.id),
         listProjectEnvVars(project.id),
         listJobs(project.id),
-        listSnapshots(project.id),
       ]);
       if (c.status === 'fulfilled') {
         setContainers(c.value);
@@ -117,7 +115,6 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
       if (v.status === 'fulfilled') setVolumes(v.value);
       if (e.status === 'fulfilled') setEnvVars(e.value);
       if (j.status === 'fulfilled') setJobs(j.value);
-      if (s.status === 'fulfilled') setSnapshots(s.value);
     } finally {
       setLoading(false);
     }
@@ -397,21 +394,11 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
     setEnvVars(latest);
   };
 
-  const handleRestoreSnapshot = async (snapshotId: string) => {
-    try {
-      await restoreSnapshot(project.id, snapshotId);
-      toastSuccess('リストアを開始しました');
-    } catch (e: unknown) {
-      toastError(e instanceof Error ? e.message : 'リストアに失敗しました');
-    }
-  };
-
   const tabs: { key: Tab; label: string; count?: number }[] = [
     { key: 'containers', label: 'コンテナ', count: containers.length },
     { key: 'volumes',    label: 'ボリューム', count: volumes.length },
     { key: 'envvars',    label: '環境変数', count: envVars.length },
     { key: 'jobs',       label: 'ジョブ', count: buildJobs.length },
-    { key: 'snapshots',  label: 'スナップショット', count: snapshots.length },
     { key: 'workflows',  label: 'ワークフロー' },
   ];
 
@@ -636,37 +623,6 @@ export const ProjectDetailPage: React.FC<ProjectDetailPageProps> = ({
                     data={buildJobs}
                     keyExtractor={(j) => j.id}
                     emptyMessage="ビルドジョブなし"
-                  />
-                )}
-              </div>
-            )}
-
-            {/* スナップショット */}
-            {tab === 'snapshots' && (
-              <div>
-                <div className="mb-4">
-                  <h2 className="text-base font-semibold text-gray-800">スナップショット</h2>
-                  <p className="text-xs text-gray-500">プロジェクトのバックアップポイント</p>
-                </div>
-                {snapshots.length === 0 ? (
-                  <EmptyState title="スナップショットがありません" description="デプロイ時に自動的に作成されます。" />
-                ) : (
-                  <Table
-                    columns={[
-                      { key: 'desc', header: '説明', render: (s) => <span className="text-gray-700">{s.description || '—'}</span> },
-                      { key: 'containers', header: 'コンテナ数', render: (s) => <span className="text-gray-600">{s.container_count}</span> },
-                      { key: 'created', header: '作成日', render: (s) => <span className="text-gray-500 text-xs">{formatDate(s.created_at)}</span> },
-                      {
-                        key: 'actions', header: '',
-                        render: (s) => (
-                          <Button variant="outlined" size="sm" onClick={() => handleRestoreSnapshot(s.id)}>
-                            リストア
-                          </Button>
-                        ),
-                      },
-                    ]}
-                    data={snapshots}
-                    keyExtractor={(s) => s.id}
                   />
                 )}
               </div>
